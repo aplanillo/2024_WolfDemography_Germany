@@ -1,0 +1,14 @@
+.Rhistory
+.Rproj.user/
+
+R/.Rhistory
+R/0_read_data_raw.Rmd
+
+R/_archive/
+data_raw/
+data_proc/_archive/
+data_proc/data_wolf_reproduction_envconv.csv
+data_proc/data_wolf_survival_hs_nterr.csv
+docs/
+output/
+R/_oldCode.Rmd

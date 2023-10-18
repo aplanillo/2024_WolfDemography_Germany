@@ -1,0 +1,542 @@
+---
+title: "explore_data"
+author: "Aimara Planillo"
+date: "2023-06-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r set workspace}
+source("./R/source_packages.R")
+
+procdata_wd <- file.path("./data_proc")
+plot_wd <- file.path("./output/figures/")
+tmp_wd <- file.path("./output/tmp_output/")
+```
+
+
+# Explore Survival Data
+
+We are going to run a first exploration of the raw data for survival, based on 
+visual inspection of sex, age and other explanatory variables
+
+## Load data
+
+```{r load and prepare data}
+surv_wolf <- read.csv(paste0(procdata_wd, "/data_wolf_survival_table.csv"))
+
+head(surv_wolf)
+nrow(surv_wolf)
+# [1] 1062
+
+```
+
+
+## Get data summaries
+```{r summary age class}
+
+## add age class at death
+wolf_surv_data <- surv_wolf %>% 
+  mutate(age_death = case_when(
+    status == 1 ~ "alive",
+    status == 0 & weeks_date <= 52 ~"Juvenile",
+    status == 0 & weeks_date > 52 & weeks_date <= 104 ~"Subadult",
+    status == 0 & weeks_date > 104 ~ "Adult")) %>% 
+  mutate(age_death = fct_relevel(age_death,"alive", "Juvenile", "Subadult", "Adult")) 
+
+head(wolf_surv_data)
+
+wolf_surv_data %>% 
+  group_by(death_year, age_death) %>% 
+  summarise(n = n()) 
+```
+
+```{r summary explanatory variables}
+## by sex
+wolf_surv_data %>% 
+  group_by(sex) %>% 
+  summarise(n = n())
+#   sex       n
+#   <chr> <int>
+# 1 f       486
+# 2 m       576
+
+## by season
+wolf_surv_data %>% 
+  group_by(season) %>% 
+  summarise(n = n())
+#   season     n
+#   <chr>  <int>
+# 1 Summer   264
+# 2 Winter   798
+
+## mean natal HS
+mean(wolf_surv_data$hs_8km_natal)
+# [1] 375.1385
+
+## mean final HS
+mean(wolf_surv_data$hs_8km_final)
+# [1] 338.6975
+
+mean(wolf_surv_data$nterr_dens_buffer50_first)
+# [1] 26.87473
+
+mean(wolf_surv_data$nterr_dens_buffer50_last)
+# [1] 24.45907
+
+```
+
+
+## Create summary plots
+
+### All years together
+```{r total death by age class}
+total_death <- wolf_surv_data %>% 
+  filter(age_death != "alive") %>% 
+  nrow()
+total_alive <- wolf_surv_data %>% 
+  filter(age_death == "alive") %>% 
+  nrow()
+
+# raw mortality numbers by age
+mort_age <- wolf_surv_data %>% 
+  group_by(age_death) %>% 
+  summarise(total_count = n()) %>% 
+  mutate(percentage = total_count/sum(total_count)) %>% 
+  ungroup()
+  
+(plot1 <- ggplot(data = mort_age, aes(x = age_death, y = total_count)) +
+    geom_col() +
+    geom_text(aes(label = total_count), vjust = -0.5, hjust = 1.5) +
+    geom_text(aes(label = paste0("(", round(percentage, 2) * 100, "%)")), 
+                  vjust = -0.5, hjust = 0) +
+    annotate(geom="text", 
+             x = 3.8, y = 400, 
+             label=paste0("Total dead = ", total_death),
+             color="black") +
+    annotate(geom="text", 
+             x = 3.8, y = 380, 
+             label=paste0("Total alive = ", total_alive),
+             color="black") +
+    annotate(geom="rect", 
+             xmin = 3.3, ymin = 360,
+             xmax = 4.3, ymax = 420,
+             col = "black", fill = "transparent") +
+    ggtitle("Total raw counts per age group") +
+    xlab("Age-class at death") +
+    ylab("#Individuals") +
+    theme_bw()) 
+
+ggsave(plot = plot1, 
+       filename = paste0(tmp_wd, "/plot_bars_age_death.png"), 
+       dpi = 600, width = 6, height = 5)
+```
+
+
+```{r total death by sex}
+# raw mortality numbers by sex
+wolf_data_tmp <- wolf_surv_data %>% 
+  filter(status == 0) %>% 
+  group_by(sex) %>% 
+  dplyr::summarise(total_count = n())
+
+(plot2 <- ggplot(data = wolf_data_tmp, aes(x = sex, y = total_count)) +
+    geom_col() +
+    geom_text(aes(label = total_count), vjust = -0.5) +
+    ggtitle("Total raw counts per sex",
+            subtitle = "Dead individuals") +
+    annotate(geom="text", 
+             x = 1, y = 400, 
+             label=paste0("Total dead = ", total_death),
+             color="black") +
+    annotate(geom="text", 
+             x = 1, y = 380, 
+             label=paste0("Total alive = ", total_alive),
+             color="black") +
+    annotate(geom="rect", 
+             xmin = 0.8, ymin = 370,
+             xmax = 1.2, ymax = 410,
+             col = "black", fill = "transparent") +
+    theme_bw())
+```
+
+
+```{r total death by sex and age}
+# raw mortality numbers by age and sex
+wolf_data_tmp <- wolf_surv_data %>% 
+  group_by(age_death, sex) %>% 
+  dplyr::summarise(total_count = n())
+
+(plot3 <- ggplot(data = wolf_data_tmp, aes(x = age_death, y = total_count)) +
+  geom_col(aes(fill = sex), position = "dodge") +
+    scale_fill_manual(values = c("purple", "orange")) +
+    
+    geom_text(aes(label = total_count, group = sex),
+              position = position_dodge(width = 0.9), vjust = -0.5) +
+    ggtitle("Total counts by age class and sex") +
+    xlab("Age-class at death") +
+    ylab("#Individuals") +
+    annotate(geom="text", 
+             x = 3.9, y = 250, 
+             label=paste0("Total dead = ", total_death),
+             color="black") +
+    annotate(geom="text", 
+             x = 3.9, y = 240, 
+             label=paste0("Total alive = ", total_alive),
+             color="black") +
+    annotate(geom="rect", 
+             xmin = 3.3, ymin = 230,
+             xmax = 4.5, ymax = 260,
+             col = "black", fill = "transparent") +
+    theme_bw() +
+    theme(plot.title = element_text(face = "bold", size = 16, colour = "black"),
+      axis.title = element_text(face = "bold", size = 14, colour = "black"),
+          axis.text = element_text(size = 12, colour = "black"), 
+          legend.title = element_text(face = "bold", size = 14, colour = "black"), 
+          legend.text = element_text(size = 12, colour = "black")) 
+          ) 
+
+ggsave(plot = plot3, 
+       filename = paste0(tmp_wd, "/plot_bars_age_sex_death.png"), 
+       dpi = 600, width = 6, height = 5)  
+```
+
+```{r plot percentages of dead by age and sex}
+head(wolf_surv_data)
+
+wolf_surv_data %>% 
+  filter(status == 0) %>% 
+  group_by(sex) %>% 
+  summarise(n = n(),
+            prop = n() / nrow(surv_wolf[surv_wolf$status == 0,]))
+#     sex       n  prop
+#   <chr> <int> <dbl>
+# 1 f       273 0.461
+# 2 m       319 0.539
+
+# percentages of sex within each age class
+wolf_data_tmp <- wolf_surv_data %>% 
+  group_by(age_death, sex) %>% 
+  dplyr::summarise(total_count = n()) %>% 
+  ungroup() %>% 
+  filter(age_death != "alive") %>%  #remove alive ind
+  group_by(age_death) %>% 
+  mutate(percentage = total_count/sum(total_count))
+
+(plot4 <- ggplot(data = wolf_data_tmp, aes(x = age_death, y = percentage)) +
+  geom_col(aes(fill = sex), alpha = 0.7) +
+    geom_text(aes(label = paste0("(",total_count, ")"), group = sex),
+              position = position_stack(vjust = 0.5)) +
+    geom_text(aes(label = round(percentage, 2), group = sex),
+              position = position_stack(vjust = 0.65)) +
+    ggtitle("Dead individuals: Percentages of sex by age class") +
+    scale_fill_manual(values = c("purple", "orange")) +
+    theme_bw() +
+        theme(plot.title = element_text(face = "bold", size = 16, colour = "black"),
+      axis.title = element_text(face = "bold", size = 14, colour = "black"),
+          axis.text = element_text(size = 12, colour = "black"), 
+          legend.title = element_text(face = "bold", size = 14, colour = "black"), 
+          legend.text = element_text(size = 12, colour = "black")) 
+    ) 
+
+ggsave(plot = plot4, 
+       filename = paste0(tmp_wd, "/plot_bars_percdeath_age_sex.png"), 
+       dpi = 600, width = 6, height = 5)
+```
+
+
+### Along the years 
+
+```{r plot summaries deaths age class year}
+head(wolf_surv_data)
+
+# get Oranges palette 5 colors from color brewer
+my_palette <- c('#ffffd4','#fed98e','#fe9929','#d95f0e','#993404')
+
+(hm_plot <- wolf_surv_data %>% 
+    filter(death_year <= 2020) %>% ## remove few observations after
+    filter(age_death != "alive") %>% 
+    group_by(death_year, age_death) %>% 
+    summarise(n = n()) %>% 
+  ggplot(aes(x = death_year, y = age_death, fill = n)) +
+  geom_tile(col = "grey90", size = 0.1) +
+  scale_fill_gradientn(colors = my_palette, name = "Number of \nindividuals", 
+                       limits = c(0,80),
+                       breaks = c(1,21,41,61,80)) +
+  labs(title = "Wolf deaths by age class along the years") +
+  xlab("Monitoring year") +
+  ylab("Age class") +
+  theme_bw() +
+  theme(
+    plot.title= element_text(size = 16, face = "bold", colour = "black"), 
+    plot.subtitle= element_text(size = 14, face = "italic", colour = "black"), 
+    axis.title = element_text(size = 14, face = "bold", colour = "black"),
+    axis.text = element_text(size = 14, colour = "black"),
+    axis.line = element_line(linewidth = 0.5, colour = "black"),
+    plot.margin=unit(c(1,4,1,1),"cm"),
+    legend.position = c(1.12, 0.78),
+    legend.title = element_text(size = 14, face = "bold", colour = "black"),
+    legend.text = element_text(size = 14, colour = "black")
+  ))
+
+ggsave(plot = hm_plot, 
+       filename = paste0(tmp_wd, "/Plot_heatmap_deaths_age_years.png"), 
+       dpi = 600, width = 8, height = 4) 
+```
+
+
+
+# Explore Reproduction Data
+
+## load data
+```{r}
+## wolf number of territories
+## get territory data and make spatial data
+wolf_terr_df <- read.csv("./data_raw/20220719_Territorien DBBW.csv") %>% 
+  # remove data after year 2020
+  filter(Mjahr < 2021) %>%  
+  # remove single territorial individuals
+  filter(Status != 3) %>% 
+  group_by(Mjahr) %>% 
+  summarise(nterr = n())
+
+head(wolf_terr_df)
+
+## wolf reproduction table
+wolf_repro <- read.csv(paste0(procdata_wd, "/data_wolf_reproduction_table.csv"))
+head(wolf_repro)
+```
+
+          
+## Plot raw data summaries
+```{r plot n reproduction events}
+# Summary of reproduction events
+summ_table_events <- wolf_repro %>% 
+  mutate(pups_fct = case_when(
+    Npups == 0 ~ "No",
+    Npups > 0 ~ "Yes",
+    TRUE ~ "No" # when NA, we assume 0
+  )) %>% 
+  group_by(sYear , pups_fct) %>% 
+  summarise(n = n()) %>% 
+  as.data.frame() 
+
+summ_table_events$pups_fct <- fct_relevel(summ_table_events$pups_fct, "Yes", "No")
+summ_table_events
+
+# Extract colours from scico
+paletteer::paletteer_c(palette = "scico::tofino", n = 7, direction = 1)
+
+my_palette_z <- c("#5D9F57FF", "#6C87CAFF")
+
+ggplot(summ_table_events, aes(x = sYear)) +
+  geom_line(aes(y = n, colour = pups_fct), size = 1.5) +
+  scale_colour_manual(values = my_palette_z,
+                      name = "Reproduction", labels = c("Yes", "No")) +
+  ylab("Number of territories") +
+  xlab("Year") +
+  ggtitle("Reproduction events in wolf territories", 
+          subtitle = "Number of events over the years") +
+  theme_bw() +
+  theme(
+    axis.text = element_text(size = 12, colour = "black"),
+    axis.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.text = element_text(size = 12, colour = "black"),
+    plot.title =  element_text(size = 16, colour = "black", face = "bold")
+  )
+```
+
+```{r plot weighted mean proportion of territories with reproduction}
+summ_table_events
+
+prop_events <- summ_table_events %>% 
+  group_by(sYear, pups_fct) %>% 
+  summarise(n = sum(n)) %>% 
+  mutate(prop = n/sum(n), 
+         total_year = sum(n)) %>% 
+  ungroup() %>% 
+  mutate(pups_fct = pups_fct %>% 
+           fct_relevel("No","Yes"))
+
+prop_events
+wolf_terr_df
+# very few territories in teh beginning
+## compute average number of territories with reproduction 
+## keeping all territories 
+
+prop_pups <- prop_events %>% 
+  # filter(total_year > 10) %>% 
+  filter(pups_fct == "Yes") 
+
+avg_prop <- weighted.mean(x = prop_pups$prop, w = prop_pups$total_year)
+avg_prop
+# [1] 0.891844
+
+# palette
+my_lines <- c("avg_prop" = "dashed")
+
+paletteer::paletteer_c(palette = "scico::cork", n = 7, direction = 1)
+my_palette_p <- c( "#E6EEECFF", "#448942FF")
+
+# plot ploportions
+ggplot(prop_events, aes(x = sYear , y = prop)) +
+  geom_bar(aes( fill = pups_fct), col = "transparent", stat = "identity", alpha = 0.7) +
+  scale_fill_manual(values = my_palette_p,
+                      name = "Reproduction") +
+  geom_area(data = wolf_terr_df, aes(x=Mjahr, y = nterr/max(wolf_terr_df$nterr)),
+              alpha = 0.2 , size = 1, colour = "darkred", fill = "darkred", linetype = "dotdash") +
+  scale_y_continuous(name = "Proportion of territories", limits = c(0,1),
+                     sec.axis = sec_axis(~.* max(prop_events$total_year), name = "Total number of territories")) +
+  xlab("Year") +
+  geom_abline(intercept = avg_prop, slope = 0, linetype = "twodash", 
+              colour = "grey40", size = 1) + # this is the line plot
+  geom_line(aes(y = 1.5, linetype = "avg_prop"), colour = "grey40") + # this is just to get the legend
+  scale_linetype_manual(values=c("twodash"), name = "", label = "Weighted mean")+
+  guides(fill = guide_legend(order = 1), 
+              linetype = guide_legend(order = 2)) +
+  
+  theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    panel.grid = element_blank(),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.line.y.right = element_line(size = 1, colour = "darkred"),
+    axis.title.y.right = element_text(size = 14, colour = "darkred", face = "bold"),
+    axis.text.y.right = element_text(size = 12, colour = "darkred"),
+    axis.text = element_text(size = 12, colour = "black"),
+    axis.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.text = element_text(size = 12, colour = "black"),
+    plot.title =  element_text(size = 16, colour = "black", face = "bold"),
+    legend.margin = margin(-0.5,0,0,0, unit="cm")
+  )
+
+ggsave(filename =  paste0(plot_wd, "/Plot_summary_repro_years_nterr.png"), 
+       dpi = 600, height = 4.5, width = 8)
+```
+
+```{r plot number of pups}
+wolf_repro %>% 
+  filter(Npups > 0) %>% 
+  summarise(mean_pups = mean(Npups), 
+            sd_pups = sd(Npups)) 
+#   mean_pups  sd_pups
+# 1  4.034755 1.95812
+
+## N pups for territories wiht reproduction    
+summ_pups_table <- wolf_repro %>% 
+  # make all NA zeros
+  filter(Npups > 0) %>% 
+  mutate(Npups = replace(Npups, is.na(Npups), 0)) %>% 
+  group_by(sYear) %>% 
+  summarise(n_terr = n(),
+            mean_pups = mean(Npups), 
+            sd_pups = sd(Npups)) %>% 
+  mutate(type = "AllData") %>% 
+  as.data.frame() #%>% 
+
+summ_pups_table
+
+(p <- ggplot(data = summ_pups_table, aes(x = sYear, y = mean_pups)) +
+  geom_line(colour = "#AC7825FF", size = 2) +
+  geom_ribbon(aes(ymin = mean_pups - sd_pups, ymax = mean_pups + sd_pups),
+              fill = "#AC7825FF", alpha = 0.2)) +
+  xlab("Year") +
+  ylab("Average number of pups") +
+  theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    # panel.grid = element_blank(),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.line.y.right = element_line(size = 1, colour = "darkred"),
+    axis.title.y.right = element_text(size = 14, colour = "darkred", face = "bold"),
+    axis.text.y.right = element_text(size = 12, colour = "darkred"),
+    axis.text = element_text(size = 12, colour = "black"),
+    axis.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.text = element_text(size = 12, colour = "black"),
+    plot.title =  element_text(size = 16, colour = "black", face = "bold"),
+    legend.margin = margin(-0.5,0,0,0, unit="cm")
+  )
+
+ggsave(filename =  paste0(plot_wd, "/Plot_summary_repro_avg_pups_years.png"),
+       dpi = 600, height = 4, width = 5)
+```
+
+
+## estimate the distribution that adjust to number of pups and the parameters
+```{r distribution of number of pups}
+## get data only with reproduction (npups > 0)
+npups_table <- wolf_repro %>% 
+  filter(Npups > 0) 
+hist(npups_table$Npups)
+
+fitdistrplus::descdist(npups_table$Npups, discrete = TRUE)
+
+## try poisson
+fit_poisson <- fitdist(npups_table$Npups, "pois")
+plot(fit_poisson)
+
+fit_poisson$aic
+# [1] 2627.652
+
+## try normal
+fit_norm <- fitdist(npups_table$Npups, "norm")
+plot(fit_norm)
+
+fit_norm$aic
+# [1] 2713.052
+
+## poisson is clearly better
+
+hist(npups_table$pups_numbers)
+my_pois <- rpois(n = 10000, lambda = mean(npups_table$Npups))
+my_norm <- rnorm(n = 10000, mean = mean(npups_table$Npups),sd = sd(npups_table$Npups))
+
+my_pois_df <- as.data.frame(my_pois)
+head(my_pois_df)
+my_norm_df <- as.data.frame(my_norm)
+
+distributions_data <- cbind(obs = npups_table$Npups, 
+                   exp_pois = my_pois,
+                   exp_norm = my_norm) %>% 
+  as.data.frame()
+dist_data_long <- pivot_longer(distributions_data, cols = c("obs", "exp_pois", "exp_norm"))
+dist_data_long <- dist_data_long %>% 
+  mutate(dist = name) %>% 
+  mutate(dist = dist %>% 
+           fct_relevel("obs", "exp_pois"))
+str(dist_data_long)
+
+## plot densities
+ggplot(dist_data_long, aes(x = value, groups = dist, colour = dist, fill = dist)) +
+  geom_density(aes(alpha = dist, linetype = dist), bw = 0.42, position = "identity") +
+  scale_colour_manual(values = c("grey20", "orange", "navyblue")) +
+  scale_fill_manual(values = c("darkgrey", "orange", "navyblue")) +
+  scale_linetype_manual(values = c("solid", "solid", "dashed")) +
+  scale_alpha_manual(values = c(1, 0.2, 0.1)) +
+  xlab("# Pups") +
+  ylab("Density") +
+  theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    # panel.grid = element_blank(),
+    axis.line = element_line(size = 1, colour = "black"),
+    axis.line.y.right = element_line(size = 1, colour = "darkred"),
+    axis.title.y.right = element_text(size = 14, colour = "darkred", face = "bold"),
+    axis.text.y.right = element_text(size = 12, colour = "darkred"),
+    axis.text = element_text(size = 12, colour = "black"),
+    axis.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.title = element_text(size = 14, colour = "black", face = "bold"),
+    legend.text = element_text(size = 12, colour = "black"),
+    plot.title =  element_text(size = 16, colour = "black", face = "bold"),
+    legend.margin = margin(-0.5,0,0,0, unit="cm")
+  )
+```

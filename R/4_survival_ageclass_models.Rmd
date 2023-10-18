@@ -1,0 +1,1424 @@
+---
+title: "survival_ageclass"
+author: "Aimara Planillo"
+date: "2023-06-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r prepare workspace}
+source("./R/source_packages.R")
+source("R/source_functions.R") # function to prepare tables of results in univariate models
+ 
+procdata_wd <- file.path("./data_proc")
+plot_wd <- file.path("./output/figures/")
+tmp_wd <- file.path("./output/tmp_output/")
+table_wd <- file.path("./output/tables")
+```
+
+
+
+# Survival analysis - Annual Age Classes
+
+For a description of variables see script 3 - Survival general model
+
+### load survival data and extract age class data
+```{r}
+wolf_surv_df <- read.csv(paste0(procdata_wd, "/data_wolf_survival_table.csv"))
+
+head(wolf_surv_df)
+nrow(wolf_surv_df)
+## Divide into age classes 
+
+# selec juveniles and censored the not dead ones
+juv_surv <- wolf_surv_df %>% 
+  mutate(weeks_juveniles = case_when(
+    weeks_date <= 52 ~ as.numeric(weeks_date),
+    weeks_date > 52 ~ 52.5)) %>% 
+  mutate(status_juveniles = case_when(
+    weeks_juveniles > 52 ~ as.integer(0),
+    weeks_juveniles <= 52 ~ status
+  ))
+  
+juv_surv %>% 
+  group_by(status_juveniles) %>% 
+  summarise(nind = n())
+#  status  nind
+#    <int> <int>
+# 1      0   756
+# 2      1   298
+
+
+# select data for the second year: those that survived more than 52 weeks. Individuals more than 104 weeks, censored
+sub_surv <- wolf_surv_df %>% 
+  filter(weeks_date > 52) %>% 
+  mutate(weeks_subadults = case_when(
+    weeks_date <= 104 ~ as.numeric(weeks_date),
+    weeks_date > 104 ~ 104.5)) %>% 
+  # rescale to start at 0
+  mutate(weeks_subadults = weeks_subadults - 52) %>% 
+  mutate(status_subadults = case_when(
+    weeks_subadults > 52 ~ as.integer(0),
+    weeks_subadults <= 52 ~ status
+  )) 
+
+head(sub_surv)
+nrow(sub_surv)
+# 474
+
+sub_surv %>% 
+  group_by(status_subadults) %>% 
+  summarise(nind = n())
+#  status_subadults  nind
+#              <dbl> <int>
+# 1                0   363
+# 2                1   111
+
+
+# select data for the third year on: only those that made it to adults 
+ad_surv <- wolf_surv_df %>% 
+  filter(weeks_date > 104) %>% 
+  # rescale to start at 104 weeks: adults
+  mutate(weeks_adults = weeks_date - 104)
+   
+ad_surv %>% 
+  group_by(status) %>% 
+  summarise(nind = n())
+#   status  nind
+#    <dbl> <int>
+# 1      0   158
+# 2      1    57
+
+## make a loop to divide each individual into as many rows as years
+adult_split <- base::split(ad_surv, ad_surv$IndID)
+length(adult_split)
+# [1] 215 ind
+
+new_list <- list()
+for(i in 1:length(adult_split)){
+  ind_tmp <- adult_split[[i]]
+  nyears_tmp <- ind_tmp$weeks_adults/52
+  ind_tmp$nyears <- ceiling(ind_tmp$weeks_adults/52)
+  ind_duprows_tmp <- ind_tmp %>% 
+  slice(rep(1:n(),each=nyears))
+  # make status in every row censored except the last one that we keep as it was
+  ind_final <- ind_duprows_tmp %>% 
+  mutate(status_adults = status) %>% 
+  mutate(status_adults = replace(status_adults, 1:nrow(ind_duprows_tmp)-1, 0)) %>% 
+  mutate(weeks_adults2 = weeks_adults) %>% 
+  mutate(weeks_adults2 = replace(weeks_adults2, 1:nrow(ind_duprows_tmp)-1, 
+                                 values = 52)) %>% 
+  mutate(weeks_adults2 = replace(weeks_adults2, nrow(ind_duprows_tmp), 
+                                 values = weeks_adults - ((nrow(ind_duprows_tmp)-1) * 52)))
+  # add to a new list
+  new_list[[i]] <- ind_final 
+}
+
+head(new_list)
+
+# make the new list into a dataframe again
+ad_surv_peryear <- do.call(rbind, new_list)
+
+head(ad_surv_peryear)
+nrow(ad_surv_peryear)
+# [1] 526 # number of rows
+length(unique(ad_surv_peryear$IndID))
+# [1] 215 # number of individuals
+
+ad_surv_peryear %>% 
+  group_by(status_adults) %>% 
+  summarise(nind = n())
+# status_adults  nind
+#           <dbl> <int>
+# 1             0   469
+# 2             1    57 # Actual deaths
+```
+
+### get summaries by age class
+```{r get numbers by sex and season}
+## by sex
+juv_surv %>% 
+  group_by(sex) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 f       480
+# 2 m       574
+
+sub_surv %>% 
+  group_by(sex) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 f       242
+# 2 m       232
+
+ad_surv %>% 
+  group_by(sex) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 f       122
+# 2 m       93
+
+
+## by season
+juv_surv %>% 
+  group_by(season) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 Summer   321
+# 2 Winter   733
+
+sub_surv %>% 
+  group_by(season) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 Summer   201
+# 2 Winter   273
+
+ad_surv %>% 
+  group_by(season) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 Summer   89
+# 2 Winter   126
+```
+
+```{r get mean and sd habitat}
+## mean natal HS
+mean(juv_surv$hs_8km_natal)
+# [1] 0.3756536
+mean(sub_surv$hs_8km_natal)
+# [1] 0.3886633
+mean(ad_surv$hs_8km_natal)
+# [1] 0.4063552
+
+sd(juv_surv$hs_8km_natal)
+# [1] 0.101517
+sd(sub_surv$hs_8km_natal)
+# [1] 0.1024055
+sd(ad_surv$hs_8km_natal)
+# [1] 0.09747033
+
+## mean final HS
+mean(juv_surv$hs_8km_final)
+# [1] 0.3388906
+mean(sub_surv$hs_8km_final)
+# [1] 0.337044
+mean(ad_surv$hs_8km_final)
+# [1] 0.3476939
+
+sd(juv_surv$hs_8km_final)
+# [1] 0.1067531
+sd(sub_surv$hs_8km_final)
+# [1] 0.1040397
+sd(ad_surv$hs_8km_final)
+# [1] 0.1043546
+```
+
+```{r get mean and sd nterr}
+## mean natal nterr
+mean(juv_surv$nterr_dens_buffer50_first)
+# [1] 21.16594
+mean(sub_surv$nterr_dens_buffer50_first)
+# [1] 19.77647
+mean(ad_surv$nterr_dens_buffer50_first)
+# [1] 19.35073
+
+sd(juv_surv$nterr_dens_buffer50_first)
+# [1] 14.75159
+sd(sub_surv$nterr_dens_buffer50_first)
+# [1] 14.42961
+sd(ad_surv$nterr_dens_buffer50_first)
+# [1] 14.36183
+
+
+## mean natal nterr
+mean(juv_surv$nterr_dens_buffer50_last)
+# [1] 21.64657
+mean(sub_surv$nterr_dens_buffer50_last)
+# [1] 21.72394
+mean(ad_surv$nterr_dens_buffer50_last)
+# [1] 24.63462
+
+sd(juv_surv$nterr_dens_buffer50_last)
+# [1] 15.77476
+sd(sub_surv$nterr_dens_buffer50_last)
+# [1] 16.17725
+sd(ad_surv$nterr_dens_buffer50_last)
+# [1] 16.69232
+```
+
+## Correlations among variables
+```{r}
+## Juveniles
+juv_num <- juv_surv %>% 
+  dplyr::select(hs_8km_natal, hs_8km_final, nterr_dens_buffer50_first, nterr_dens_buffer50_last)
+juv_cor <- cor(juv_num, use = "pairwise.complete.obs")
+
+# plot correlation
+ggcorrplot(juv_cor, hc.order = FALSE, type = "lower",
+   lab = TRUE, outline.color = "white", 
+   lab_size = 6, tl.cex = 14) +
+  theme(plot.background = element_rect(colour = "white"),
+         axis.text.x = element_text(angle = 90), 
+        legend.title = element_text(size = 14)) 
+
+# ggsave(paste0(tmp_wd, "/Survival_juv_model_corr_variables.png"),
+#        dpi = 600, height = 6, width = 6)
+
+## Subadults
+sub_num <- sub_surv %>% 
+  dplyr::select(hs_8km_natal, hs_8km_final, nterr_dens_buffer50_first, nterr_dens_buffer50_last)
+sub_cor <- cor(sub_num, use = "pairwise.complete.obs")
+
+# plot correlation
+ggcorrplot(sub_cor, hc.order = FALSE, type = "lower",
+   lab = TRUE, outline.color = "white", 
+   lab_size = 6, tl.cex = 14) +
+  theme(plot.background = element_rect(colour = "white"),
+         axis.text.x = element_text(angle = 90), 
+        legend.title = element_text(size = 14)) 
+
+# ggsave(paste0(tmp_wd, "/Survival_subad_model_corr_variables.png"),
+#        dpi = 600, height = 6, width = 6)
+
+## Adults
+ad_num <- ad_surv %>% 
+  dplyr::select(hs_8km_natal, hs_8km_final, nterr_dens_buffer50_first, nterr_dens_buffer50_last)
+ad_cor <- cor(ad_num, use = "pairwise.complete.obs")
+
+# plot correlation
+ggcorrplot(ad_cor, hc.order = FALSE, type = "lower",
+   lab = TRUE, outline.color = "white", 
+   lab_size = 6, tl.cex = 14) +
+  theme(plot.background = element_rect(colour = "white"),
+         axis.text.x = element_text(angle = 90), 
+        legend.title = element_text(size = 14)) 
+
+# ggsave(paste0(tmp_wd, "/Survival_Ad_model_corr_variables.png"),
+#        dpi = 600, height = 6, width = 6)
+```
+
+
+## get scaled data
+```{r}
+juv_surv_scl <- juv_surv %>% 
+  mutate(nterr_dens_buffer50_first = scale(nterr_dens_buffer50_first), 
+         nterr_dens_buffer50_last = scale(nterr_dens_buffer50_last),
+         hs_8km_natal = scale(hs_8km_natal),
+         hs_8km_final = scale(hs_8km_final))
+
+sub_surv_scl <- sub_surv %>% 
+  mutate(nterr_dens_buffer50_first = scale(nterr_dens_buffer50_first), 
+         nterr_dens_buffer50_last = scale(nterr_dens_buffer50_last),
+         hs_8km_natal = scale(hs_8km_natal),
+         hs_8km_final = scale(hs_8km_final))
+
+ad_surv_peryear_scl <- ad_surv_peryear %>% 
+  mutate(nterr_dens_buffer50_first = scale(nterr_dens_buffer50_first), 
+         nterr_dens_buffer50_last = scale(nterr_dens_buffer50_last),
+         hs_8km_natal = scale(hs_8km_natal),
+         hs_8km_final = scale(hs_8km_final))
+```
+
+
+## Univariate and bivariate-interaction regressions 
+
+```{prepare variables for univariate models}
+# covariate list for all univariate models
+
+## num and two level covariates
+my_cov_num_juv <- c("sex", "season", 
+                "hs_8km_natal", "nterr_dens_buffer50_first")
+
+my_cov_num_sub <- c("sex", "season", 
+                "hs_8km_natal", "hs_8km_final", 
+                "nterr_dens_buffer50_first", "nterr_dens_buffer50_last" )
+
+my_cov_num_ad <- c("sex", "season", 
+                   "hs_8km_final", "nterr_dens_buffer50_last" )
+
+## interaction covariates
+my_cov_int <- c("sex + season", "sex * season")
+```
+
+```{r juvenile univariate models}
+
+## models for numerical or two my_cov_num_juv covariates
+## we use the scaled data
+
+univ_formulas_1 <- sapply(my_cov_num_juv,
+                        function(x) as.formula(paste('Surv(weeks_juveniles , status_juveniles)~', x)))
+univ_models_1 <- lapply( univ_formulas_1, function(x){coxph(x, data = juv_surv_scl)})
+
+# extract results from the models
+univ_results_1 <- lapply(univ_models_1, FUN = get.model.output.cont)
+
+# format as table      
+res_juv <- get.univ.table.cont(univ_results_1)
+# write.csv(res_juv, paste0(table_wd, "/Table_survival_juv_model_univariate_comparison.csv"))
+
+## models for interaction covariates
+univ_formulas_2 <- sapply(my_cov_int,
+                        function(x) as.formula(paste('Surv(weeks_juveniles , status_juveniles)~', x)))
+univ_models_2 <- lapply(univ_formulas_2, function(x){coxph(x, data = juv_surv_scl)})
+
+res_int <- aictab(univ_models_2)
+# write.csv(res_int, paste0(table_wd, "/Table_survival_Juv_model_bivariate_interaction_AIC.csv"))
+```
+The interaction sex * season *does not improve* the model for juveniles
+
+```{r subadults univariate models}
+
+univ_formulas_1 <- sapply(my_cov_num_sub,
+                        function(x) as.formula(paste('Surv(weeks_subadults, status_subadults)~', x)))
+univ_models_1 <- lapply( univ_formulas_1, function(x){coxph(x, data = sub_surv_scl)})
+
+univ_results_1 <- lapply(univ_models_1, FUN = get.model.output.cont)
+
+res_sub <- get.univ.table.cont(univ_results_1)
+# write.csv(res_sub, paste0(table_wd, "/Table_survival_subad_model_univariate_comparison.csv"))
+
+## models for interaction covariates
+univ_formulas_2 <- sapply(my_cov_int,
+                        function(x) as.formula(paste('Surv(weeks_subadults , status_subadults)~', x)))
+univ_models_2 <- lapply(univ_formulas_2, function(x){coxph(x, data = sub_surv)})
+
+res_sub_int <- aictab(univ_models_2)
+# write.csv(res_sub_int, paste0(table_wd, "/Table_survival_subad_model_bivariate_interaction_AIC.csv"))
+```
+The interaction sex * season *improves* the model for juveniles
+
+```{r adults univariate models}
+## Now we use the models with Individual as clustering variables to account for the repetitions over the years 
+
+## models for numerical or two level covariates
+univ_formulas_1 <- sapply(my_cov_num_ad,
+                        function(x) as.formula(paste('Surv(weeks_adults2 , status_adults)~', x)))
+univ_models_1 <- lapply( univ_formulas_1, function(x){coxph(x, data = ad_surv_peryear_scl, cluster = IndID)})
+
+# extract results from the models
+univ_results_1 <- lapply(univ_models_1, FUN = get.model.output.cont)
+res_ad <- get.univ.table.cont(univ_results_1)
+# write.csv(res_ad, paste0(table_wd, "/Table_survival_adult_model_univariate_comparison.csv"))
+
+## models for multilevel covariates
+univ_formulas_2 <- sapply(my_cov_int,
+                        function(x) as.formula(paste('Surv(weeks_adults2, status_adults)~', x)))
+univ_models_2 <- lapply(univ_formulas_2, function(x){coxph(x, data = ad_surv_peryear,  cluster = IndID)})
+
+res_ad_int <- aictab(univ_models_2)
+# write.csv(res_ad_int, paste0(table_wd, "/Table_survival_adult_model_bivariate_interaction_AIC.csv"))
+```
+The interaction sex * season *does not improve* the model for juveniles
+
+
+## COX multiple regressions 
+
+```{r prepare model selection for multivariate models}
+## juveniles
+head(juv_surv)
+
+mod_list_juveniles <- as.list(c(
+  ## models with sex and season as additive
+  "full_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ sex + season + hs_8km_natal + nterr_dens_buffer50_first),
+  "ss_hs_first_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ sex + season + hs_8km_natal),
+  "ss_nterr_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ sex + season + nterr_dens_buffer50_first),
+  "nterr_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ nterr_dens_buffer50_first),
+  "hs_first_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ hs_8km_natal),
+  "season_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ season),
+  "sex_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ sex),
+  "null_model" = as.formula(Surv(weeks_juveniles, status_juveniles) ~ 1))
+)
+
+# store in text model for later use
+form_text <- vector()
+for(i in 1:length(mod_list_juveniles)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_juveniles[[i]]))
+}
+
+mod_juv_form_table <- cbind.data.frame(Modnames = names(mod_list_juveniles), 
+                                       Modformula = form_text)
+
+## subadults
+head(sub_surv)
+
+mod_list_subadults <- c(
+    ## models with sex and season as additive
+  "full_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ sex * season + hs_8km_natal + hs_8km_final + nterr_dens_buffer50_last),
+  "sxs_hs_first_model" = (Surv(weeks_subadults, status_subadults) ~ sex * season + hs_8km_natal),
+  "sxs_hs_last_model" = (Surv(weeks_subadults, status_subadults) ~ sex * season + hs_8km_final),
+  "sxs_nterr_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ sex * season + nterr_dens_buffer50_last),
+  "nterr_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ nterr_dens_buffer50_last),
+  "hs_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ hs_8km_natal + hs_8km_final),
+  "hs_first_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ hs_8km_natal),
+  "hs_last_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ hs_8km_final),
+  "season_model" = as.formula(Surv(weeks_subadults, status_subadults) ~  season),
+  "sex_model" = as.formula(Surv(weeks_subadults, status_subadults) ~  sex),
+  "null_model" = as.formula(Surv(weeks_subadults, status_subadults) ~ 1)
+)
+
+form_text <- vector()
+for(i in 1:length(mod_list_subadults)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_subadults[[i]]))
+}
+
+mod_subad_form_table <- cbind.data.frame(Modnames = names(mod_list_subadults), 
+                                       Modformula = form_text)
+
+## adults
+head(ad_surv_peryear)
+
+mod_list_adults <- c(
+    ## models with sex and season as additive
+  "full_model" = as.formula(Surv(weeks_adults2, status_adults) ~ sex + season + hs_8km_final + nterr_dens_buffer50_last),
+  "ss_hs_last_model" = as.formula(Surv(weeks_adults2, status_adults) ~ sex + season + hs_8km_final),
+  "ss_nterr_model" = as.formula(Surv(weeks_adults2, status_adults) ~ sex + season + nterr_dens_buffer50_last),
+  "nterr_model" = as.formula(Surv(weeks_adults2, status_adults) ~ nterr_dens_buffer50_last),
+  "hs_model" = as.formula(Surv(weeks_adults2, status_adults) ~ hs_8km_final),
+  "season_model" = as.formula(Surv(weeks_adults2, status_adults) ~  season),
+  "sex_model" = as.formula(Surv(weeks_adults2, status_adults) ~  sex),
+  "null_model" = as.formula(Surv(weeks_adults2, status_adults) ~ 1))
+
+form_text <- vector()
+for(i in 1:length(mod_list_adults)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_adults[[i]]))
+}
+
+mod_adults_form_table <- cbind.data.frame(Modnames = names(mod_list_adults), 
+                                       Modformula = form_text)
+```
+
+### Cox juveniles 
+```{r annual survival juveniles}
+# Multiple  regressions
+juveniles_all_models <- lapply( mod_list_juveniles, function(x){coxph(x, 
+                                                                      data = juv_surv_scl)})
+
+juv_aictab <- aictab(juveniles_all_models, second.ord = TRUE)
+juv_aictab
+juv_aictab <- juv_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_juv_form_table, by = "Modnames")
+# write.csv(juv_aictab, paste0(table_wd, "/Table_survival_juv_model_multivariate_modsel.csv"), row.names = FALSE)
+
+## best model
+best_formula_juv  <- as.formula(juv_aictab$Modformula[1])
+juveniles_cox <- coxph(formula = best_formula_juv, data = juv_surv_scl)
+summary(juveniles_cox)
+
+juveniles_coeftable <- tidy(juveniles_cox)
+# write.csv(juveniles_coeftable, paste0(table_wd, "/Table_survival_juv_model_BEST_coef.csv"), row.names = FALSE)
+
+juveniles_hrtable <- tidy(juveniles_cox, exponentiate = TRUE, conf.int = TRUE)
+# write.csv(juveniles_hrtable, paste0(table_wd, "/Table_survival_juv_model_BEST_hazratios.csv"), row.names = FALSE)
+
+juveniles_fit <- survfit(juveniles_cox, na.action = "na.rm") 
+
+# get survival and confidence interval
+round(juveniles_fit$surv[length(juveniles_fit$surv)], 2)
+# [1] 0.75
+round(juveniles_fit$lower[length(juveniles_fit$surv)], 2)
+# [1] 0.69
+round(juveniles_fit$upper[length(juveniles_fit$surv)], 2)
+# [1] 0.81
+
+# diagnostic for the model
+ggcoxdiagnostics(juveniles_cox, type = "deviance", 
+                 ox.scale = "linear.predictions")
+```
+
+```{r annual survival juveniles - predicting variable effects}
+## model without scaling for plotting
+
+juveniles_cox <- coxph(formula = best_formula_juv, data = juv_surv)
+
+summary(juveniles_cox)
+
+# Predict by sex
+juv_sex_df <- with(juv_surv,
+               data.frame(
+                 sex = c("m", "f"),
+                 season = c("Winter"),
+                 hs_8km_natal = mean(hs_8km_natal), 
+                 nterr_dens_buffer50_first = mean(nterr_dens_buffer50_first)))
+juv_sex_df  
+
+fit <- survfit(juveniles_cox, newdata = juv_sex_df)
+fit$surv
+
+# get labels to plot
+sex_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(sex_srv_labels) <- c("Male", "Female")
+surv_male <- sex_srv_labels$Male
+surv_female <- sex_srv_labels$Female
+
+juv_plot <- ggsurvplot(fit, data = juv_sex_df, conf.int = TRUE, 
+           legend.labs=c("Male", "Female"),
+           ggtheme = theme_bw())
+
+(juv_plot$plot <- juv_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "Sex") +
+    scale_colour_viridis_d(direction = -1, name = "Sex") +
+    ggtitle("Juveniles - Annual survival by sex") +
+    ylim(0.3, 1) +
+    xlab("Weeks") +
+    theme_bw() +
+    theme(
+      panel.background = element_rect(colour = "transparent", fill = "white"),
+
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.3, hjust = 0,
+           vjust = 0,
+    label = paste0("Season = Winter", 
+                   "\nHS_natal = ", round(mean(juv_surv$hs_8km_natal), 2), 
+                   "\nTerrDens_natal = ", round(mean(juv_surv$nterr_dens_buffer50_first), 3)
+                   ),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+  annotate("text", x = 55, y = surv_male, hjust = 0,
+  label = round(surv_male, 2), size = 4, vjust = 1, 
+  colour = "black") +
+    annotate("text", x = 55, y = surv_female, hjust = 0,
+  label = round(surv_female, 2), size = 4, vjust = 0, 
+  colour = "black"))
+  
+juv_sex_plot <- juv_plot$plot
+
+# Predict by season
+juv_season_df <- with(juv_surv,
+               data.frame(
+                 sex = c("m"),
+                 season = c("Winter", "Summer"),
+                 hs_8km_natal = mean(hs_8km_natal), 
+                nterr_dens_buffer50_first = mean(nterr_dens_buffer50_first)))
+fit <- survfit(juveniles_cox, newdata = juv_season_df)
+
+fit$surv
+season_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(season_srv_labels) <- c("Winter", "Summer")
+surv_winter <- season_srv_labels$Winter
+surv_summer <- season_srv_labels$Summer
+
+juv_plot <- ggsurvplot(fit, data = juv_season_df, conf.int = TRUE, 
+           legend.labs=c("Winter", "Summer"),
+           ggtheme = theme_bw())
+
+(juv_plot$plot <- juv_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "Season") +
+    scale_colour_viridis_d(direction = -1, name = "Season") +
+    ggtitle("Juveniles - Annual survival by season") +
+    ylim(0.3, 1) +
+    xlab("Weeks") +
+    theme(
+      panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.3, hjust = 0, vjust = 0,
+    label = paste0("Sex = Male", 
+                   "\nHS_natal = ", round(mean(juv_surv$hs_8km_natal), 2),
+                    "\nTerrDens_natal = ", round(mean(juv_surv$nterr_dens_buffer50_first), 3)),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+  annotate("text", x = 55, y = surv_winter, hjust = 0,
+  label = round(surv_winter, 2), size = 4, vjust = 1, 
+    colour = "black") +
+    annotate("text", x = 55, y = surv_summer, hjust = 0,
+  label = round(surv_summer, 2), size = 4, vjust = 0, 
+    colour = "black")) 
+juv_season_plot  <- juv_plot$plot
+
+
+# By Natal habitat suitability
+juv_hsfirst_df <- with(juv_surv,
+               data.frame(
+                 sex = c("m"),
+                 season = c("Winter"),
+                 hs_8km_natal = c(min(hs_8km_natal),
+                                 mean(hs_8km_natal),
+                                 max(hs_8km_natal)), 
+                  nterr_dens_buffer50_first = mean(nterr_dens_buffer50_first)))
+                   
+fit <- survfit(juveniles_cox, newdata = juv_hsfirst_df)
+
+fit$surv
+hsfirst_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(hsfirst_srv_labels) <- c("Min_hs_natal", "Mean_hs_natal", "Max_hs_natal")
+  
+surv_minhsfirst <- hsfirst_srv_labels$Min_hs_natal
+surv_meanhsfirst <- hsfirst_srv_labels$Mean_hs_natal
+surv_maxhsfirst <- hsfirst_srv_labels$Max_hs_natal
+
+juv_plot <- ggsurvplot(fit, data = juv_hsfirst_df, conf.int = TRUE, 
+           legend.labs=c(round(min(juv_surv$hs_8km_natal), 2), 
+                         round(mean(juv_surv$hs_8km_natal), 2), 
+                         round(max(juv_surv$hs_8km_natal), 2)),
+           ggtheme = theme_bw()) 
+
+(juv_plot$plot <- juv_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "HS natal") +
+    scale_colour_viridis_d(direction = -1, name = "HS natal") +
+    ggtitle("Juveniles - Annual survival by HS natal") +
+    xlab("Weeks") +
+    coord_cartesian(ylim = c(0.3,1), xlim = c(0, 52), clip = "off") +
+    theme(
+     panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.3, hjust = 0, vjust = 0,
+    label = paste0("Sex = Male \nSeason = Winter", 
+                   "\nTerrDens_natal = ", round(mean(juv_surv$nterr_dens_buffer50_first), 3)), 
+    size = 4) +
+  annotate("text", x = 55, y = surv_minhsfirst, hjust = 0,
+  label = round(surv_minhsfirst, 2), size = 4, vjust = 1,
+    colour = "black") +
+    annotate("text", x = 55, y = surv_meanhsfirst, hjust = 0,
+  label = round(surv_meanhsfirst, 2), size = 4, vjust = 0,
+    colour = "black") +
+     annotate("text", x = 55, y = surv_maxhsfirst, hjust = 0,
+  label = round(surv_maxhsfirst, 2), size = 4, vjust = 0,
+    colour = "black"))
+juv_hsfirst_plot  <- juv_plot$plot
+
+
+# By Natal territory density 
+juv_nterrfirst_df <- with(juv_surv,
+               data.frame(
+                 sex = c("m"),
+                 season = c("Winter"),
+                 hs_8km_natal = mean(hs_8km_natal), 
+                 nterr_dens_buffer50_first = c(min(nterr_dens_buffer50_first),
+                                               mean(nterr_dens_buffer50_first),
+                                               max(nterr_dens_buffer50_first))))
+                   
+fit <- survfit(juveniles_cox, newdata = juv_nterrfirst_df)
+
+fit$surv
+nterr_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(nterr_srv_labels) <- c("Min_nterr_natal", "Mean_nterr_natal", "Max_nterr_natal")
+  
+surv_minnterrfirst <- nterr_srv_labels$Min_nterr_natal
+surv_meannterrfirst <- nterr_srv_labels$Mean_nterr_natal
+surv_maxnterrfirst <- nterr_srv_labels$Max_nterr_natal
+
+juv_plot <- ggsurvplot(fit, data = juv_nterrfirst_df, conf.int = TRUE, 
+           legend.labs=c(round(min(juv_surv$nterr_dens_buffer50_first), 3), 
+                         round(mean(juv_surv$nterr_dens_buffer50_first), 3), 
+                         round(max(juv_surv$nterr_dens_buffer50_first), 3)),
+           ggtheme = theme_bw()) 
+
+(juv_plot$plot <- juv_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "Nterr natal") +
+    scale_colour_viridis_d(direction = -1, name = "Nterr natal") +
+    ggtitle("Juveniles - Annual survival by Nterr natal") +
+    xlab("Weeks") +
+    # scale_y_continuous(limits = c(0.3, 1),
+    #                    oob = scales::squish) +
+    coord_cartesian(ylim = c(0.3,1), xlim = c(0, 52), clip = "off") +
+    theme(
+     panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.3, hjust = 0, vjust = 0,
+    label = paste0("Sex = Male \nSeason = Winter", 
+                   "\nHS_natal = ", round(mean(juv_surv$hs_8km_natal), 2)), 
+    size = 4) +
+  annotate("text", x = 55, y = surv_minnterrfirst, hjust = 0,
+  label = round(surv_minnterrfirst, 2), size = 4, vjust = 1,
+    colour = "black") +
+    annotate("text", x = 55, y = surv_meannterrfirst, hjust = 0,
+  label = round(surv_meannterrfirst, 2), size = 4, vjust = 0,
+    colour = "black") +
+     annotate("text", x = 55, y = surv_maxnterrfirst, hjust = 0,
+  label = round(surv_maxnterrfirst, 2), size = 4, vjust = 0,
+    colour = "black"))
+juv_nterrfirst_plot  <- juv_plot$plot
+```
+
+```{r combined plot predictions juveniles}
+juv_sex_plot2 <- juv_sex_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+  
+juv_season_plot2 <- juv_season_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+juv_hsfirst_plot2 <- juv_hsfirst_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+juv_nterrfirst_plot2 <- juv_nterrfirst_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+
+(allplot <- plot_grid(juv_sex_plot2, 
+                     juv_season_plot2, 
+                     juv_hsfirst_plot2, 
+                     juv_nterrfirst_plot2,
+                     labels = c("a", "b", "c", "d"),
+                     ncol = 2)
+)
+
+ # ggsave(plot = allplot, 
+ #       paste0(tmp_wd, "/Plot_juv_model_pred_all.png",
+ #               format(Sys.Date(), "%Y%m%d"), ".png"),
+ #       dpi = 600, width = 9, height = 9)
+```
+
+
+### Cox subadults 
+```{r annual survival subadults}
+# Multiple  regressions
+subadults_all_models <- lapply(mod_list_subadults, function(x){coxph(x, data = sub_surv_scl)})
+
+subad_aictab <- aictab(subadults_all_models, second.ord = TRUE)
+subad_aictab
+subad_aictab <- subad_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_subad_form_table, by = "Modnames")
+# write.csv(subad_aictab, paste0(table_wd, "/Table_survival_subad_multivariate_modsel.csv"), row.names = FALSE)
+
+## best model: additive model
+best_formula_subad  <- as.formula(subad_aictab$Modformula[1])
+subadults_cox <- coxph(formula = best_formula_subad, data = sub_surv_scl)
+summary(subadults_cox)
+
+subad_coeftable <- tidy(subadults_cox)
+# write.csv(subad_coeftable, paste0(table_wd, "/Table_survival_subad_model_BEST_coef.csv"), row.names = FALSE)
+
+subad_hrtable <- tidy(subadults_cox, exponentiate = TRUE, conf.int = TRUE)
+# write.csv(subad_hrtable, paste0(table_wd, "/Table_survival_subad_model_BEST_hazratios.csv"), row.names = FALSE)
+
+subadults_fit <- survfit(subadults_cox, na.action = "na.rm") 
+
+# get survival and confidence interval
+round(subadults_fit$surv[length(subadults_fit$surv)], 2)
+# [1] 0.75
+round(subadults_fit$lower[length(subadults_fit$surv)], 2)
+# [1] 0.66
+round(subadults_fit$upper[length(subadults_fit$surv)], 2)
+# [1] 0.86
+```
+
+```{r yearly survival subadults - predicting variable effects}
+# model without scaling for the plots
+subadults_cox <- coxph(formula = best_formula_subad, data = sub_surv)
+
+summary(subadults_cox)
+
+# Predict by sex in winter
+sub_sex_w_df <- with(sub_surv,
+               data.frame(
+                 sex = c("m", "f"),
+                 season = c("Winter"),
+                 hs_8km_natal = mean(hs_8km_natal),
+                 hs_8km_final = mean(hs_8km_final), 
+                 nterr_dens_buffer50_last = mean(nterr_dens_buffer50_last )))
+
+fit <- survfit(subadults_cox, newdata = sub_sex_w_df)
+fit$surv
+
+sex_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(sex_srv_labels) <- c("Male", "Female")
+surv_male <- sex_srv_labels$Male
+surv_female <- sex_srv_labels$Female
+
+sub_plot <- ggsurvplot(fit, data = sub_sex_w_df, conf.int = TRUE, 
+           legend.labs=c("Male", "Female"),
+           ggtheme = theme_bw())
+
+(sub_plot$plot <- sub_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "Sex") +
+    scale_colour_viridis_d(direction = -1, name = "Sex") +
+    ggtitle("Subadults - Annual survival by sex in winter") +
+    ylim(0.45, 1) +
+    xlab("Weeks") +
+    theme(
+     panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.45, hjust = 0,
+           vjust = 0,
+    label = paste0("Season = Winter" ,
+                   "\nHS_Natal = ", round(mean(sub_surv$hs_8km_natal), 2),
+                   "\nHS_Final = ", round(mean(sub_surv$hs_8km_final), 2),
+                   "\nTerrDens_Final = ", round(mean(sub_surv$nterr_dens_buffer50_last), 2)),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+  annotate("text", x = 55, y = surv_male, hjust = 0,
+  label = round(surv_male, 2), size = 4, vjust = 1, colour = "black") +
+    annotate("text", x = 55, y = surv_female, hjust = 0,
+  label = round(surv_female, 2), size = 4, vjust = 0,  colour = "black"))
+sub_sexwinter_plot<- sub_plot$plot
+
+# Predict by sex in summer
+sub_sex_s_df <- with(sub_surv,
+               data.frame(
+                 sex = c("m", "f"),
+                 season = c("Summer"),
+                 hs_8km_natal = mean(hs_8km_natal),
+                 hs_8km_final = mean(hs_8km_final), 
+                 nterr_dens_buffer50_last = mean(nterr_dens_buffer50_last )))
+
+fit <- survfit(subadults_cox, newdata = sub_sex_s_df)
+fit$surv
+
+sex_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(sex_srv_labels) <- c("Male", "Female")
+surv_male <- sex_srv_labels$Male
+surv_female <- sex_srv_labels$Female
+
+sub_plot <- ggsurvplot(fit, data = sub_sex_s_df, conf.int = TRUE, 
+           legend.labs=c("Male", "Female"),
+           ggtheme = theme_bw())
+
+(sub_plot$plot <- sub_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "Sex") +
+    scale_colour_viridis_d(direction = -1, name = "Sex") +
+    ggtitle("Subadults - Annual survival by sex in summer") +
+    scale_y_continuous(limits = c(0.45, 1),
+                       oob = scales::squish)+
+    xlab("Weeks") +
+    theme(
+    panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.45, hjust = 0,
+           vjust = 0,
+    label = paste0("Season = Summer" ,
+                   "\nHS_Natal = ", round(mean(sub_surv$hs_8km_natal), 2),
+                   "\nHS_Final = ", round(mean(sub_surv$hs_8km_final), 2),
+                   "\nTerrDens_Final = ", round(mean(sub_surv$nterr_dens_buffer50_last), 2)),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+  annotate("text", x = 55, y = surv_male, hjust = 0,
+  label = round(surv_male, 2), size = 4, vjust = 1,  colour = "black") +
+    annotate("text", x = 55, y = surv_female, hjust = 0,
+  label = round(surv_female, 2), size = 4, vjust = 0,  colour = "black"))
+sub_sexsummer_plot<- sub_plot$plot
+  
+
+
+## By HS natal
+sub_hsfirst_df <- with(sub_surv,
+               data.frame(
+                 sex = c("m"),
+                 season = c("Winter"),
+                 hs_8km_natal = c(min(hs_8km_natal), 
+                                 mean(hs_8km_natal),
+                                 max(hs_8km_natal)), 
+                 hs_8km_final = mean(hs_8km_final),
+                 nterr_dens_buffer50_last = mean(nterr_dens_buffer50_last )))
+
+                   
+fit <- survfit(subadults_cox, newdata = sub_hsfirst_df)
+hs_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(hs_srv_labels) <- c("minhs", "meanhs", "maxhs")
+surv_minhs <- hs_srv_labels$minhs
+surv_meanhs <- hs_srv_labels$meanhs
+surv_maxhs <- hs_srv_labels$maxhs
+
+sub_plot <- ggsurvplot(fit, data = sub_hsfirst_df, conf.int = TRUE, 
+           legend.labs=c(round(min(sub_surv$hs_8km_natal), 2), 
+                         round(mean(sub_surv$hs_8km_natal), 2),
+                         round(max(sub_surv$hs_8km_natal), 2)),
+           ggtheme = theme_bw())
+
+(sub_plot$plot <- sub_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "HS natal") +
+    scale_colour_viridis_d(direction = -1, name = "HS natal") +
+    ggtitle("Subadults - Annual survival by HS Natal") +
+    scale_y_continuous(limits = c(0.45, 1),
+                       oob = scales::squish) +
+    xlab("Weeks") +
+    theme(
+    panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.45, hjust = 0,
+           vjust = 0,
+    label = paste0("Sex = Male \nSeason = Winter", 
+                   "\nHS_Final = ", round(mean(sub_surv$hs_8km_final), 2),
+                   "\nTerrDens_Final = ", round(mean(sub_surv$nterr_dens_buffer50_last), 2)),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+    annotate("text", x = 55, y = surv_minhs, hjust = 0,
+             label = round(surv_minhs, 2), size = 4, vjust = 1, colour = "black") +
+    annotate("text", x = 55, y = surv_meanhs, hjust = 0,
+             label = round(surv_meanhs, 2), size = 4, vjust = 0, colour = "black") +
+    annotate("text", x = 55, y = surv_maxhs, hjust = 0,
+             label = round(surv_maxhs, 2), size = 4, vjust = 0, colour = "black") 
+)
+sub_hsfirst_plot<- sub_plot$plot
+
+
+## By HS final
+sub_hslast_df <- with(sub_surv,
+               data.frame(
+                 sex = c("m"),
+                 season = c("Winter"),
+                 hs_8km_natal = mean(hs_8km_natal), 
+                 hs_8km_final = c(min(hs_8km_final), 
+                                 mean(hs_8km_final),
+                                 max(hs_8km_final)),
+                 nterr_dens_buffer50_last = mean(nterr_dens_buffer50_last )))
+
+                   
+fit <- survfit(subadults_cox, newdata = sub_hslast_df)
+hslast_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(hslast_srv_labels) <- c("minhs", "meanhs", "maxhs")
+surv_minhs <- hslast_srv_labels$minhs
+surv_meanhs <- hslast_srv_labels$meanhs
+surv_maxhs <- hslast_srv_labels$maxhs
+
+sub_plot <- ggsurvplot(fit, data = sub_hslast_df, conf.int = TRUE, 
+           legend.labs=c(round(min(sub_surv$hs_8km_final), 2), 
+                         round(mean(sub_surv$hs_8km_final), 2),
+                         round(max(sub_surv$hs_8km_final), 2)),
+           ggtheme = theme_bw())
+
+(sub_plot$plot <- sub_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "HS final") +
+    scale_colour_viridis_d(direction = -1, name = "HS final") +
+    ggtitle("Subadults - Annual survival by HS final") +
+    scale_y_continuous(limits = c(0.45, 1),
+                       oob = scales::squish) +
+    xlab("Weeks") +
+    theme(
+    panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.45, hjust = 0,
+           vjust = 0,
+    label = paste0("Sex = Male \nSeason = Winter",
+                    "\nHS_Natal = ", round(mean(sub_surv$hs_8km_natal), 2),
+                   "\nTerrDens_Final = ", round(mean(sub_surv$nterr_dens_buffer50_last), 2)),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+    annotate("text", x = 55, y = surv_minhs, hjust = 0,
+             label = round(surv_minhs, 2), size = 4, vjust = 1, colour = "black") +
+    annotate("text", x = 55, y = surv_meanhs, hjust = 0,
+             label = round(surv_meanhs, 2), size = 4, vjust = 0, colour = "black") +
+    annotate("text", x = 55, y = surv_maxhs, hjust = 0,
+             label = round(surv_maxhs, 2), size = 4, vjust = 0, colour = "black") 
+)
+sub_hslast_plot<- sub_plot$plot
+
+
+## By Nterr final
+sub_nterrlast_df <- with(sub_surv,
+               data.frame(
+                 sex = c("m"),
+                 season = c("Winter"),
+                 hs_8km_natal = mean(hs_8km_natal), 
+                 hs_8km_final = mean(hs_8km_final),
+                 nterr_dens_buffer50_last = c(min(nterr_dens_buffer50_last ),
+                                              mean(nterr_dens_buffer50_last ),
+                                              max(nterr_dens_buffer50_last ))))
+
+fit <- survfit(subadults_cox, newdata = sub_nterrlast_df)
+nterr_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(nterr_srv_labels) <- c("minNterr", "meanNterr", "maxNterr")
+surv_minNterr <- nterr_srv_labels$minNterr
+surv_meanNterr <- nterr_srv_labels$meanNterr
+surv_maxNterr <- nterr_srv_labels$maxNterr
+
+sub_plot <- ggsurvplot(fit, data = sub_nterrlast_df, conf.int = TRUE, 
+           legend.labs=c(round(min(sub_surv$nterr_dens_buffer50_last), 2), 
+                         round(mean(sub_surv$nterr_dens_buffer50_last), 2),
+                         round(max(sub_surv$nterr_dens_buffer50_last), 2)),
+           ggtheme = theme_bw())
+
+(sub_plot$plot <- sub_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "Nterr final") +
+    scale_colour_viridis_d(direction = -1, name = "Nterr final") +
+    ggtitle("Subadults - Annual survival by Nterr final") +
+    scale_y_continuous(limits = c(0.45, 1),
+                       oob = scales::squish) +
+    xlab("Weeks") +
+    theme(
+    panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.45, hjust = 0,
+           vjust = 0,
+    label = paste0("Sex = Male \nSeason = Winter",
+                    "\nHS_Natal = ", round(mean(sub_surv$hs_8km_natal), 2),
+                   "\nHS_Final = ", round(mean(sub_surv$hs_8km_final), 2)),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+    annotate("text", x = 55, y = surv_minhs, hjust = 0,
+             label = round(surv_minNterr, 2), size = 4, vjust = 1, colour = "black") +
+    annotate("text", x = 55, y = surv_meanhs, hjust = 0,
+             label = round(surv_meanNterr, 2), size = 4, vjust = 0, colour = "black") +
+    annotate("text", x = 55, y = surv_maxhs, hjust = 0,
+             label = round(surv_maxNterr, 2), size = 4, vjust = 0, colour = "black") 
+)
+sub_nterrlast_plot<- sub_plot$plot
+
+```
+
+```{r combined plot predictions subadults}
+
+sub_sexsummer_plot2 <- sub_sexsummer_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+  
+sub_sexwinter_plot2 <- sub_sexwinter_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+sub_hsfirst_plot2 <- sub_hsfirst_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+
+sub_hslast_plot2 <- sub_hslast_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+
+sub_nterrlast_plot2 <- sub_nterrlast_plot +
+  theme(
+    plot.title = element_blank(),
+    # legend.position = c(0.9, 0.9),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10, face = "bold")
+    )
+
+(allplot <- plot_grid(sub_sexwinter_plot2, 
+                      sub_sexsummer_plot2,  
+                      sub_hsfirst_plot2,
+                      sub_hslast_plot2, 
+                      sub_nterrlast_plot2,
+                      labels = c("a", "b", "c", "d", "e"),
+                     ncol = 3, nrow = 2)
+)
+
+ # ggsave(plot = allplot, 
+ #       paste0(tmp_wd, "/Plot_subad_model_pred_all.png",
+ #               format(Sys.Date(), "%Y%m%d"), ".png"),
+ #       dpi = 600, width = 13, height = 9)
+```
+
+### Cox adults 
+```{r annual survival adults}
+head(ad_surv_peryear) 
+
+## Multiple regression with cluster effects for Individual to account for the repetition
+adults_all_models <- lapply( mod_list_adults, function(x){coxph(x,
+                                                                cluster = IndID, 
+                                                                data = ad_surv_peryear_scl, 
+                                                                )})
+
+adult_aictab <- aictab(adults_all_models, second.ord = TRUE)
+adult_aictab
+adult_aictab <- adult_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_adults_form_table, by = "Modnames")
+# write.csv(adult_aictab, paste0(table_wd, "/Table_survival_adult_multivariate_modsel.csv"), row.names = FALSE)
+
+## best model: nterr model
+best_formula_ad  <- as.formula(adult_aictab$Modformula[1])
+adults_cox <- coxph(formula = best_formula_ad, data = ad_surv_peryear_scl, cluster = IndID)
+summary(adults_cox)
+
+ad_coeftable <- tidy(adults_cox)
+# write.csv(ad_coeftable, paste0(table_wd, "/Table_survival_adult_model_BEST_coef.csv"), row.names = FALSE)
+
+ad_hrtable <- tidy(adults_cox, exponentiate = TRUE, conf.int = TRUE)
+# write.csv(ad_hrtable, paste0(table_wd, "/Table_survival_adult_model_BEST_hazratios.csv"), row.names = FALSE)
+
+
+adults_fit <- survfit(adults_cox, na.action = "na.rm") 
+
+# get survival and confidence interval
+round(adults_fit$surv[length(adults_fit$surv)], 2)
+# [1] 0.88
+round(adults_fit$lower[length(adults_fit$surv)], 2)
+# [1] 0.85
+round(adults_fit$upper[length(adults_fit$surv)], 2)
+# [1] 0.91
+```
+
+```{r yearly survival adults - predicting variable effects}
+
+## model without scaling for plotting
+adults_cox <- coxph(formula = best_formula_ad, data = ad_surv_peryear, cluster = IndID)
+
+summary(adults_cox)
+
+## Predict by hs in final territory
+ad_nterrlast_df <- with(ad_surv_peryear,
+               data.frame(
+                 nterr_dens_buffer50_last = c(min(nterr_dens_buffer50_last), 
+                                 mean(nterr_dens_buffer50_last),
+                                 max(nterr_dens_buffer50_last))))
+fit <- survfit(adults_cox, newdata = ad_nterrlast_df)
+nterr_srv_labels <- fit$surv %>% 
+  as.data.frame() %>% 
+  slice_tail()
+colnames(nterr_srv_labels) <- c("min", "mean", "max")
+
+ad_plot <- ggsurvplot(fit, data = nterr_srv_labels, conf.int = TRUE, 
+           legend.labs=c(round(min(ad_surv_peryear$nterr_dens_buffer50_last), 2), 
+                         round(mean(ad_surv_peryear$nterr_dens_buffer50_last), 2),
+                         round(max(ad_surv_peryear$nterr_dens_buffer50_last), 2)),
+           ggtheme = theme_bw())
+
+(ad_plot$plot <- ad_plot$plot +
+    scale_fill_viridis_d(direction = -1, name = "NTerr final") +
+    scale_colour_viridis_d(direction = -1, name = "NTerr final") +
+    ggtitle("Adults - Annual survival by N Terr final") +
+    ylim(0.6, 1) +
+    xlab("Weeks") +
+    theme(
+     panel.background = element_rect(colour = "transparent", fill = "white"),
+      axis.title = element_text(size = 14, colour = "black", face = "bold"),
+      axis.text = element_text(size = 14, colour = "black"),
+      axis.line = element_line(colour = "black"),
+      plot.title = element_text(size = 16, colour = "black", face = "bold", hjust = 0.5),
+      legend.title = element_text(size = 14, colour = "black", face = "bold"),
+      legend.text = element_text(size = 14, colour = "black"),
+      legend.position = "top",
+      legend.background = element_rect(fill = "transparent", colour = "transparent"),
+      plot.margin = unit(c(1, 3, 1, 1), "lines"))+
+  annotate("text", x = 0, y = 0.6, hjust = 0,
+           vjust = 0,
+    label = paste0(),
+    size = 4) +
+    coord_cartesian(xlim = c(0, 52), clip = "off") +
+    annotate("text", x = 55, y =nterr_srv_labels$min, hjust = 0,
+             label = round(nterr_srv_labels$min, 2), size = 4, vjust = 1, colour = "black") +
+    annotate("text", x = 55, y = nterr_srv_labels$mean, hjust = 0,
+             label = round(nterr_srv_labels$mean, 2), size = 4, vjust = 0, colour = "black") +
+    annotate("text", x = 55, y = nterr_srv_labels$max, hjust = 0,
+             label = round(nterr_srv_labels$max, 2), size = 4, vjust = 0, colour = "black") 
+)
+ad_hs_plot <- ad_plot$plot
+
+# ggsave(plot = ad_plot$plot, 
+#        paste0(tmp_wd, "/Plot_survival_adult_model_pred_nterrfinal.png"), 
+#        dpi = 600, width = 6, height = 5)
+```
+
+```{r yearly HR plots manuscript}
+juveniles_cox <- coxph(formula = best_formula_juv, data = juv_surv_scl)
+
+subadults_cox <- coxph(formula = best_formula_subad, data = sub_surv_scl)
+
+adults_cox <- coxph(formula = best_formula_ad, data = ad_surv_peryear_scl, cluster = IndID)
+
+## Extract data for forest plot (using own function)
+toplot_juveniles <- broom::tidy(juveniles_cox, exponentiate = TRUE, conf.int = TRUE)
+toplot_subadults <- broom::tidy(subadults_cox, exponentiate = TRUE, conf.int = TRUE)
+toplot_adults <- broom::tidy(adults_cox, exponentiate = TRUE, conf.int = TRUE) %>% 
+  dplyr::select(-robust.se)
+
+
+toplot_juveniles$model <- "Juveniles"
+toplot_subadults$model <- "Subadults"
+toplot_adults$model <- "Adults"
+
+toplot_all <- rbind(toplot_juveniles, toplot_subadults, toplot_adults)
+
+toplot_all
+# rename variables and add significant variable for plotting
+toplot_all_rn <- toplot_all %>% 
+  # rename variables 
+   mutate(Variable_name = case_when(
+    term == "sexm" ~ "sex[male]",
+    term == "seasonWinter" ~ "season[winter]",
+    term == "hs_8km_natal" ~ "HS natal",
+    term == "hs_8km_final" ~ "HS final",
+    term == "nterr_dens_buffer50_first" ~ "TerrDens natal",
+    term == "nterr_dens_buffer50_last" ~ "TerrDens final",
+    term == "sexm:seasonWinter" ~ "sex*season[m*w]")) %>%
+  mutate(Variable_name = Variable_name %>% 
+           fct_relevel("sex*season[m*w]", "HS final", "HS natal", "TerrDens final", "TerrDens natal" )) %>% 
+  mutate(significant = case_when(
+    p.value < 0.05 ~ "Yes",
+    TRUE ~ "No")) %>% 
+  mutate(estimate2 = round(estimate, 2),
+         conflow2 = round(conf.low, 2),
+         confhigh2 = round(conf.high, 2))
+
+
+toplot_all_rn$model <- fct_relevel(toplot_all_rn$model, "Juveniles", "Subadults", "Adults")
+
+# Forest Plot
+str(toplot_all_rn)
+
+zp1 <- ggplot(toplot_all_rn, aes(group = as.factor(model), 
+  colour = as.factor(model))) + 
+  # future vertical line at 1
+  geom_hline(yintercept = 1, colour = "darkred", alpha = 0.5, lty = 2) +
+  # line of 95 CI
+  geom_linerange(aes(x = Variable_name, ymin = conflow2,
+                                ymax = confhigh2), 
+                            lwd = 1.5, position = position_dodge(width = -0.8/2)) +
+  # # this is the coefficient. No so important the values of ymin and ymax
+  geom_pointrange(aes(x = Variable_name, y = estimate2, ymin = conflow2,
+                                 ymax = confhigh2, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = -0.8/2)) +
+  # make it vertical
+  xlab("") +
+  ylab("Hazard Ratio") +
+  coord_flip() + 
+  # color for significant
+  scale_fill_manual(values = c("White", "black"), 
+                    name = "Significant")+
+    # scale_y_continuous(limits = c(-4.2, 3)) +
+  # color for species
+  scale_color_manual(values = scico(4, begin = 0.15, palette = "tokyo"), 
+                     name = "Age class") +
+  # scale_color_viridis(option = "magma", begin = 0.3, end = 0.9,
+  #                        guide = guide_legend(reverse = TRUE), discrete = TRUE) +
+  # extra esthetics
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "transparent", colour = "transparent"),
+    panel.grid.major = element_blank(), 
+    panel.grid = element_blank(),
+    axis.line = element_line(colour = "black"),
+    legend.background = element_blank(),
+    axis.title = element_text(colour = "black", size = 16, face = "bold"),
+    axis.text = element_text(colour = "black", size = 16),
+    legend.title = element_text(colour = "black", size = 14, face = "bold"),
+    legend.text = element_text(colour = "black", size = 14)) 
+    #ggtitle("Hazard Ratios - Wolves")
+
+zp1
+
+# save plot
+# ggsave(plot = zp1, paste0(plot_wd, "/Plot_survival_ageclasses_HR_pretty_scl.png"), 
+#        dpi = 600, height = 6, width = 8)
+```
+
+

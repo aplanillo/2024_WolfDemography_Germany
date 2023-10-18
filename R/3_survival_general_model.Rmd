@@ -1,0 +1,686 @@
+---
+title: "survival_general"
+author: "Aimara Planillo"
+date: "2023-06-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r prepare workspace}
+source("./R/source_packages.R")
+source("./R/source_functions.R")
+ 
+procdata_wd <- file.path("./data_proc")
+plot_wd <- file.path("./output/figures/")
+tmp_wd <- file.path("./output/tmp_output/")
+table_wd <- file.path("./output/tables")
+```
+
+
+# Survival Analysis - General population
+
+Using as explanatory variables *sex*, *season*, *habitat suitability* and *territory density*
+
+Week_date: n of weeks ind was alive 
+
+Response Status: 
+- Dead = 1
+- Alive = Censored = 0
+
+
+**EXPLANATORY**
+Sex: 
+- male
+- female
+
+Season:
+- Summer = May-Oct (when new pups are born and stay with pack)
+- Winter = Nov-Apr 
+
+HS
+- Natal territory
+- Final territory
+
+Territory density:
+- Around Natal territory 
+- Around Final territory 
+
+### load survival data
+```{r}
+wolf_surv_df <- read.csv(paste0(procdata_wd, "/data_wolf_survival_table.csv"))
+
+head(wolf_surv_df)
+
+## Summary number of individuals per status
+wolf_surv_df %>% 
+  group_by(status) %>% 
+  summarise(nind = n())
+#  status  nind
+#    <int> <int>
+# 1      0   588
+# 2      1   466
+```
+
+### get summaries in data
+```{r}
+## by sex
+wolf_surv_df %>% 
+  group_by(sex) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 f       480
+# 2 m       574
+
+
+## by season
+wolf_surv_df %>% 
+  group_by(season) %>% 
+  summarise(n = n())
+# sex       n
+#   <chr> <int>
+# 1 Summer   321
+# 2 Winter   733
+
+## mean natal HS
+mean(wolf_surv_df$hs_8km_natal)
+# [1] 0.3756536
+sd(wolf_surv_df$hs_8km_natal)
+# [1] 0.101517
+
+
+## mean final HS
+mean(wolf_surv_df$hs_8km_final)
+# [1] 0.3388906
+sd(wolf_surv_df$hs_8km_final)
+# [1] 0.1067531
+
+## mean natal nterr
+mean(wolf_surv_df$nterr_dens_buffer50_first)
+# [1] 21.16594
+
+sd(wolf_surv_df$nterr_dens_buffer50_first)
+# [1] 14.75159
+
+
+## mean natal nterr
+mean(wolf_surv_df$nterr_dens_buffer50_last)
+# [1] 21.64657
+
+sd(wolf_surv_df$nterr_dens_buffer50_last)
+# [1] 15.77476
+```
+
+## test for correlations in explanatory variables
+```{r get correlations in data} 
+## get numeric explanatory variables
+var_surv <- wolf_surv_df %>% 
+  dplyr::select(hs_8km_natal, hs_8km_final, nterr_dens_buffer50_first, nterr_dens_buffer50_last)
+
+var_cor <- cor(var_surv, use = "pairwise.complete.obs")
+
+# plot correlation
+ggcorrplot(var_cor, hc.order = FALSE, type = "lower",
+   lab = TRUE, outline.color = "white", 
+   lab_size = 6, tl.cex = 12) +
+  theme(plot.background = element_rect(colour = "white"), 
+        axis.text = element_text(size = 12)) 
+
+# ggsave(paste0(tmp_wd, "/Survival_general_model_corr_variables.png"),
+#        dpi = 600, height = 6, width = 6)
+```
+Territory density in natal area is correlated with that of final area
+
+
+## all data - univariate and interaction regressions
+We check which variables adjust better to the response
+We select he variables to keep by exploring the univariate results, and also the 
+value of including an interaction sex:season in the bivariate response. 
+
+```{r cox regression univariate}
+head(wolf_surv_df) 
+
+# scale the variables
+wolf_surv_df_scl <-  wolf_surv_df %>% 
+  mutate(nterr_dens_buffer50_first = scale(nterr_dens_buffer50_first), 
+         nterr_dens_buffer50_last = scale(nterr_dens_buffer50_last),
+         hs_8km_natal = scale(hs_8km_natal),
+         hs_8km_final = scale(hs_8km_final))
+  
+  
+## univariate cox regression
+## apply all univariate models in a loop 
+colnames(wolf_surv_df_scl)
+
+## numerical or two level covariates
+covariates_1 <- c("sex", "season", 
+                  "hs_8km_natal", "hs_8km_final", 
+                  "nterr_dens_buffer50_first", "nterr_dens_buffer50_last")
+
+univ_formulas_1 <- sapply(covariates_1,
+                        function(x) as.formula(paste('Surv(weeks_date, status)~', x)))
+                        
+univ_models_1 <- lapply( univ_formulas_1, function(x){coxph(x, data = wolf_surv_df_scl)})
+univ_results_1 <- lapply(univ_models_1,
+                       function(x){ 
+                         AICc <- AICc(x)
+                          x <- summary(x)
+                          p.value<-signif(x$wald["pvalue"], digits=2)
+                          wald.test<-signif(x$wald["test"], digits=2)
+                          beta<-signif(x$coef[1], digits=2);#coeficient beta
+                          HR <-signif(x$coef[2], digits=2);#exp(beta)
+                          HR.confint.lower <- signif(x$conf.int[,"lower .95"], 2)
+                          HR.confint.upper <- signif(x$conf.int[,"upper .95"],2)
+                          HR <- paste0(HR, " (", 
+                                       HR.confint.lower, "-", HR.confint.upper, ")")
+                          res<-c(beta, HR, wald.test, p.value, AICc)
+                          names(res)<-c("beta", "HR (95% CI for HR)", "wald.test", 
+                                        "p.value", "AICc")
+                          return(res)
+                         })
+res_1 <- t(as.data.frame(univ_results_1, check.names = FALSE))
+res_1 <- as.data.frame(res_1)
+res_1
+##save table
+# write.csv(res_1, paste0(table_wd, "/Table_survival_general_model_univariate_comparison_AIC.csv"))
+```
+
+```{r cox regression sex:season interaction}
+## interaction models
+covariates_int <- c("sex + season", "sex * season")
+
+int_formulas <- sapply(covariates_int,
+                        function(x) as.formula(paste('Surv(weeks_date, status)~', x)))
+int_models <- lapply(int_formulas, function(x){coxph(x, data = wolf_surv_df_scl)})
+
+int_tab <- aictab(int_models)
+
+# write.csv(int_tab, paste0(table_wd, "/Table_survival_general_model_bivariate_interation_AIC.csv"),
+#           row.names = FALSE)
+```
+
+From the exploration:
+- The interaction is better than the additive effects
+- Nterr density last adjusts better than first to the response
+
+The resulting full model is:
+- Sex * season + hs_8km_natal + hs_8km_final + nterr_dens_buffer50_last
+
+
+## Cox all data - multiple regression
+
+We are going to use an AICc model selection approach
+
+```{r cox prepare multivariate formulas}
+head(wolf_surv_df)
+
+## model selection for all data
+mod_list_general <- as.list(c(
+  "full_model" = as.formula(Surv(weeks_date, status) ~ sex * season + hs_8km_natal + hs_8km_final + nterr_dens_buffer50_last),
+  "sxs_first_model" = as.formula(Surv(weeks_date, status) ~ sex * season + hs_8km_natal),
+  "sxs_last_model" = as.formula(Surv(weeks_date, status) ~ sex * season + hs_8km_final + nterr_dens_buffer50_last),
+  "hs_first_model" = as.formula(Surv(weeks_date, status) ~ hs_8km_natal),
+  "hs_last_model" = as.formula(Surv(weeks_date, status) ~ hs_8km_final),
+  "nterr_last_model" = as.formula(Surv(weeks_date, status) ~ nterr_dens_buffer50_last),
+  "season_model" = as.formula(Surv(weeks_date, status) ~ season),
+  "sex_model" = as.formula(Surv(weeks_date, status) ~ sex),
+  "null_model" = as.formula(Surv(weeks_date, status) ~ 1))
+)
+
+# store in text model for later use
+form_text <- vector()
+for(i in 1:length(mod_list_general)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_general[[i]]))
+}
+
+mod_gen_form_table <- cbind.data.frame(Modnames = names(mod_list_general), 
+                                       Modformula = form_text)
+```
+
+```{r run multivariate regression}
+# scale values
+wolf_surv_df_scl <- wolf_surv_df %>% 
+  mutate(nterr_dens_buffer50_first = scale(nterr_dens_buffer50_first), 
+         nterr_dens_buffer50_last = scale(nterr_dens_buffer50_last),
+         hs_8km_natal = scale(hs_8km_natal),
+         hs_8km_final = scale(hs_8km_final))
+
+
+general_all_models <- lapply( mod_list_general, function(x){coxph(x, data = wolf_surv_df_scl)})
+
+gen_aictab <- aictab(general_all_models, second.ord = TRUE)
+gen_aictab
+model_selection_aictab <- gen_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_gen_form_table, by = "Modnames")
+model_selection_aictab
+# write.csv(model_selection_aictab, paste0(table_wd, "/Table_survival_general_model_multivariate_model.csv"), row.names = FALSE)
+
+## best model
+best_formula <- as.formula(model_selection_aictab$Modformula[1])
+general_cox <- coxph(formula = best_formula, data = wolf_surv_df_scl)
+summary(general_cox)
+
+general_cox_coeftable <- broom::tidy(general_cox)
+# write.csv(general_cox_coeftable, 
+#            paste0(table_wd, "/Table_survival_general_model_BEST_coeff.csv"), row.names = FALSE)
+
+general_cox_HR_table <- broom::tidy(general_cox, exponentiate = TRUE, conf.int = TRUE)
+# write.csv(general_cox_HR_table, 
+#            paste0(table_wd, "/Table_survival_general_model_BEST_hazratios.csv"), row.names = FALSE)
+
+
+# diagnostic for the model
+ggcoxdiagnostics(general_cox, type = "deviance", 
+                 ox.scale = "linear.predictions")
+
+# get median survival times
+## for general plot
+general_fit <- survfit(general_cox, na.action = "na.rm") 
+median_times <- surv_median(general_fit)
+median_times
+# strata median lower upper
+# 1    All     146    106   360
+```
+
+```{r plot pretty Hazard Ratios}
+## Customized plot to show the HR
+tidycox <- broom::tidy(general_cox, exponentiate = TRUE, conf.int = TRUE)
+unique(tidycox$term)
+tidycox <- tidycox %>% 
+  mutate(variables = case_when(
+    term == "sexm" ~ "sex[male]",
+    term == "seasonWinter" ~ "season[winter]",
+    term == "hs_8km_natal" ~ "HS natal",
+    term == "hs_8km_final" ~ "HS final",
+    term == "nterr_dens_buffer50_last" ~ "TerrDens final",
+    term == "sexm:seasonWinter" ~ "sex*season\n[m*w]")) %>% 
+  mutate(variables = variables %>% 
+           fct_relevel("sex*season\n[m*w]", "TerrDens final"))
+
+str(tidycox)
+
+p_mid <- ggplot(tidycox, aes(y = variables)) +
+  # geom_linerange(aes(xmin = conf.low, xmax = conf.high), 
+  #                lwd = 3, colour = "grey60", alpha = 0.7) +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), 
+                 lwd = 1, colour = "grey60",width = 0.2) +
+  geom_point(aes(x = estimate), size = 4) +
+  geom_vline(xintercept = 1, linetype="dashed", colour = "darkred") +
+  coord_cartesian(ylim = c(1,6), xlim = c(0, 2.5))+
+  ylab("") +
+  xlab("Hazard Ratio") +
+  annotate("text", x = 0.9, y = 6.5, hjust = 1,
+           label = 'italic("Decreased risk")', parse = TRUE,
+           size = 5, colour = "darkgreen") +
+  annotate("text", x = 1.1, y = 6.5, hjust = 0,
+           label = 'italic("Increased risk")', parse = TRUE,
+           size = 5, colour = "orangered") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", colour = "white"),
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.line.x = element_line(colour = "black"),
+    # axis.line = element_line(colour = "black"),
+    axis.text = element_text(colour = "black", size = 12), 
+    axis.title = element_text(colour = "black", size = 14, face = "bold"),
+    panel.border = element_blank(),
+    )
+    
+
+p_left <- ggplot(tidycox, aes(y = variables)) +
+  geom_text(aes(x = 0, label = variables), hjust = 0, fontface = "bold", size = 5) +
+  geom_text(aes(x = 1.5, label = paste0(round(estimate, 2), 
+                                      " (", round(conf.low, 2),
+                                      "-", round(conf.high, 2),
+                                      ")"),
+            hjust = 0, fontface = ifelse(p.value < 0.05, "bold", "plain")), 
+            size = 4) +
+  theme_void() +
+  coord_cartesian(xlim = c(0, 4))
+p_left  
+
+p_right <- ggplot(tidycox, aes()) +
+  geom_text(aes(x = 0, y = variables, label = round(p.value, 3)),
+    hjust = 0,
+    fontface = ifelse(tidycox$p.value < 0.05, "bold", "plain"),
+    size = 5
+  ) +
+  annotate("text", label = 'italic("p-value")', x = 0, y = 6.5, parse = TRUE, hjust = 0, size = 5) +
+  theme_void()
+
+p_right
+
+# final plot arrangement (patchwork)
+layout <- c(
+  area(t = 0, l = 0, b = 30, r = 15), # left plot, starts at the top of the page (5) and goes 30 units down and 15 units to the right
+  area(t = 0, l = 12, b = 30, r = 25), # middle plot starts a little lower (t=1) because there's no title. starts 1 unit right of the left plot (l=4, whereas left plot is r=3), goes to the bottom of the page (30 units), and 6 units further over from the left plot (r=9 whereas left plot is r=3)
+  area(t = 0, l = 24, b = 30, r = 28) # right most plot starts at top of page, begins where middle plot ends (l=9, and middle plot is r=9), goes to bottom of page (b=30), and extends two units wide (r=11)
+)
+# final plot arrangement
+my_HR_plot <- p_left + p_mid + p_right + plot_layout(design = layout)
+
+my_HR_plot
+
+# ggsave(plot = my_HR_plot, 
+#        paste0(plot_wd, "/Plot_survival_general_model_HR_pretty.png"),
+#        dpi = 600, width = 9, height = 6)
+```
+
+```{r plot survival curve - general model}
+
+mydata <- broom::tidy(general_fit)
+nrow(mydata) 
+
+## correct the last value for hte confidence interval
+mydata$conf.high[229]  <- mydata$conf.high[228]
+mydata$conf.low[229]  <- mydata$conf.low[228]
+
+myplot <- ggplot(mydata, aes(time, estimate)) +
+  # geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5, fill = 'blue') +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = .5, 
+              fill = 'deepskyblue4', colour = "transparent", linetype = 3) +
+  geom_step(col = "deepskyblue4", size = 1) +
+  # ggtitle("Survival Curve Wolf Germany") +
+  # subtitle = "Known birth data") +
+  xlab("Weeks") +
+  ylab("Survival %") +
+  # scale_color_manual(values="#CC6666") +
+  geom_segment(aes(x = median_times$median, xend = median_times$median, 
+                   y = 0, yend = 0.5), linetype = 6, linewidth = 0.5,  col = "deepskyblue4") +
+  geom_segment(aes(x = 0, xend = median_times$median, 
+                   y = 0.5, yend = 0.5), linetype = 6, linewidth = 0.5,  col = "deepskyblue4") +
+  annotate(
+    "text", label = paste0("Median survival time\n", median_times$median, " weeks"),
+    x = median_times$median + 10, y = 0, size = 5, colour = "deepskyblue4", 
+    fontface = "italic",  hjust = 0, vjust = 0) +
+   annotate(
+     "text", label = "Model: \nsex * season + HS natal + HS final + TerrDens final",
+     x = 230, y = 0.95, size = 5, colour = "grey20", hjust = 0, vjust = 0.5, fontface = 3) +
+  theme_bw()+
+  theme(
+   panel.border = element_blank(),
+    axis.line = element_line(colour = "black"),
+    axis.title = element_text(size = 14, colour = "black", face = "bold"),
+    axis.text = element_text(size = 14, colour = "black"),
+    plot.title = element_text(size = 16, colour = "black", face = "bold"),
+    plot.subtitle = element_text(size = 14, colour = "black", face = "italic")
+    
+  )
+myplot
+
+
+ggsave(plot = myplot,
+  paste0(plot_wd, "/Plot_survival_general_model_survival_curve2.png"),
+       dpi = 600, height = 6, width = 8)
+
+```
+
+## Get annual survival of all individuals together
+```{r}
+
+head(wolf_surv_df)
+## divide data into annual observations
+wolf_surv_df %>% 
+  group_by(status) %>% 
+  summarise(nind = n())
+#   status  nind
+#    <dbl> <int>
+# 1      0   588
+# 2      1    466
+
+## make a loop to divide each individual into as many rows as years
+ind_split <- base::split(wolf_surv_df,
+                           wolf_surv_df$IndID)
+length(ind_split)
+# [1] 1054 ind
+
+new_list <- list()
+for(i in 1:length(ind_split)){
+  ind_tmp <- ind_split[[i]]
+  nyears_tmp <- ind_tmp$weeks_date/52
+  ind_tmp$nyears <- ceiling(ind_tmp$weeks_date/52)
+  ind_duprows_tmp <- ind_tmp %>% 
+  slice(rep(1:n(),each = nyears))
+  # make status in every row censored except the last one that we keep as it was
+  ind_final <- ind_duprows_tmp %>% 
+  mutate(status_ind = status) %>% 
+  mutate(status_ind = replace(status_ind, 1:nrow(ind_duprows_tmp)-1, 0)) %>% 
+  mutate(weeks_ind = weeks_date) %>% 
+  mutate(weeks_ind = replace(weeks_ind, 1:nrow(ind_duprows_tmp)-1, 
+                                 values = 52)) %>% 
+  mutate(weeks_ind = replace(weeks_ind, nrow(ind_duprows_tmp), 
+                                 values = weeks_date - ((nrow(ind_duprows_tmp)-1) * 52)))
+  # add to a new list
+  new_list[[i]] <- ind_final 
+}
+
+head(new_list)
+# make the new list into a dataframe again
+pop_times_peryear <- do.call(rbind, new_list)
+
+head(pop_times_peryear)
+
+length(unique(pop_times_peryear$IndID))
+# [1] 1054 # number of individuals
+
+pop_times_peryear %>% 
+  group_by(status_ind) %>% 
+  summarise(nind = n())
+# status_ind  nind
+#           <dbl> <int>
+# 1             0   1588
+# 2             1    466 # Actual deaths
+
+head(pop_times_peryear)
+range(pop_times_peryear$weeks_ind)
+
+# write.csv(pop_times_peryear, paste0(tmp_wd, "/data_population_times_peryear.csv"), row.names = FALSE)
+```
+
+## check variable correlation
+```{r}
+num_vars <- pop_times_peryear %>% 
+  dplyr::select(hs_8km_natal , hs_8km_final ,
+                nterr_dens_buffer50_first, nterr_dens_buffer50_last )
+
+cor(num_vars)
+```
+Territory density in natal and final areas is correlated, select the best one for the models
+
+## Univariate and bivariate regressions 
+
+```{prepare variables for univariate models}
+# covariate list for all univariate models
+head(pop_times_peryear)
+
+## num and two level covariates
+my_cov_num <- c("sex", "season", 
+                "hs_8km_natal","hs_8km_final",
+                "nterr_dens_buffer50_first", "nterr_dens_buffer50_last")
+
+## interaction covariates
+my_cov_int <- c("sex + season", "sex * season")
+```
+
+#### univ 
+```{r pop univariate models}
+## Now we use the models with Individual as clustering variables to account for the repetitions over the years 
+
+## models for numerical or two level covariates
+univ_formulas_1 <- sapply(my_cov_num,
+                        function(x) as.formula(paste('Surv(weeks_ind , status_ind)~', x)))
+univ_models_1 <- lapply( univ_formulas_1, function(x){coxph(x, data = pop_times_peryear, cluster = IndID)})
+
+# extract results from the models
+univ_results_1 <- lapply(univ_models_1, FUN = get.model.output.cont)
+res_pop <- get.univ.table.cont(univ_results_1)
+# write.csv(res_pop, paste0(table_wd, "/Table_survival_allpopulation_model_univariate_comparison.csv"))
+
+## models for multilevel covariates
+univ_formulas_2 <- sapply(my_cov_int,
+                        function(x) as.formula(paste('Surv(weeks_ind, status_ind)~', x)))
+univ_models_2 <- lapply(univ_formulas_2, function(x){coxph(x, data = pop_times_peryear,  cluster = IndID)})
+
+res_pop_int <- aictab(univ_models_2)
+# write.csv(res_pop_int, paste0(table_wd, "/Table_survival_allpopulation_model_bivariate_interaction_AIC.csv"))
+```
+Territory density in the final territory adjusts better to the data
+The interaction sex * season *improves* the model for population
+
+## multiple regressions 
+
+```{r prepare model selection for multivariate models}
+head(pop_times_peryear)
+
+mod_list_pop <- c(
+    ## models with sex and season as additive
+  "full_model" = as.formula(Surv(weeks_ind, status_ind) ~ sex * season + hs_8km_natal + hs_8km_final + nterr_dens_buffer50_last),
+  "sxs_hs_first_model" = (Surv(weeks_ind, status_ind) ~ sex * season + hs_8km_natal),
+  "sxs_hs_last_model" = (Surv(weeks_ind, status_ind) ~ sex * season + hs_8km_final),
+  "sxs_nterr_model" = (Surv(weeks_ind, status_ind) ~ sex * season + nterr_dens_buffer50_last),
+  "hs_model" = as.formula(Surv(weeks_ind, status_ind) ~ hs_8km_natal + hs_8km_final),
+  "hs_first_model" = as.formula(Surv(weeks_ind, status_ind) ~ hs_8km_natal),
+  "hs_last_model" = as.formula(Surv(weeks_ind, status_ind) ~ hs_8km_final),
+  "nterr_last_model" = as.formula(Surv(weeks_ind, status_ind) ~ nterr_dens_buffer50_last), 
+  "season_model" = as.formula(Surv(weeks_ind, status_ind) ~  season),
+  "sex_model" = as.formula(Surv(weeks_ind, status_ind) ~  sex),
+  "null_model" = as.formula(Surv(weeks_ind, status_ind) ~ 1))
+
+form_text <- vector()
+for(i in 1:length(mod_list_pop)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_pop[[i]]))
+}
+
+mod_pop_form_table <- cbind.data.frame(Modnames = names(mod_list_pop), 
+                                       Modformula = form_text)
+```
+
+### multiv population  
+```{r yearly survival pop}
+head(pop_times_peryear) 
+
+## Multiple regression with cluster effects for Individual to account for the repetition
+pop_all_models <- lapply( mod_list_pop, function(x){coxph(x, cluster = IndID, 
+                                                                data = pop_times_peryear, 
+                                                                )})
+pop_aictab <- aictab(pop_all_models, second.ord = TRUE)
+pop_aictab
+pop_aictab <- pop_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_pop_form_table, by = "Modnames")
+# write.csv(pop_aictab, paste0(table_wd, "/Table_survival_allpopulation_multivariate_modelsel.csv"), row.names = FALSE)
+
+
+## best model is the full model
+best_formula_pop  <- as.formula(pop_aictab$Modformula[1])
+pop_cox <- coxph(formula = best_formula_pop, data = pop_times_peryear)
+summary(pop_cox)
+
+pop_coeftable <- tidy(pop_cox)
+# write.csv(pop_coeftable, paste0(table_wd, "/Table_survival_allpopulation_model_BEST_coef.csv"), row.names = FALSE)
+
+pop_hrtable <- tidy(pop_cox, exponentiate = TRUE, conf.int = TRUE)
+# write.csv(pop_hrtable, paste0(table_wd, "/Table_survival_allpopulation_model_BEST_hazratios.csv"), row.names = FALSE)
+
+pop_fit <- survfit(pop_cox, na.action = "na.rm") 
+summary(pop_fit)
+# get survival and confidence interval
+round(pop_fit$surv[length(pop_fit$surv)], 2)
+# [1] 0.81
+round(pop_fit$lower[length(pop_fit$surv)], 2)
+# [1] 0.76
+round(pop_fit$upper[length(pop_fit$surv)], 2)
+# [1] 0.85
+
+## std error
+se <-  round(pop_fit$std.err[length(pop_fit$surv)], 3)
+se
+# [1] 0.028
+
+# diagnostic for the model
+ggcoxdiagnostics(pop_cox, type = "deviance", 
+                 ox.scale = "linear.predictions")
+
+## Plot hazard ratios
+Pop_HR <- ggforest(pop_cox, data = pop_times_peryear,
+                   main = "Hazard ratio - adults known birth") 
+Pop_HR
+  
+```
+
+
+```{r yearly HR plots manuscript}
+## Extract data for forest plot (using own function)
+toplot_pop <- broom::tidy(pop_cox, exponentiate = TRUE, conf.int = TRUE)
+
+toplot_pop$model <- "Population"
+
+# rename variables and add significant variable for plotting
+toplot_pop_rn <- toplot_pop %>% 
+  # rename variables 
+   mutate(Variable_name = case_when(
+    term == "sexm" ~ "sex[male]",
+    term == "seasonWinter" ~ "season[winter]",
+    term == "hs_8km_natal" ~ "HS Natal",
+    term == "hs_8km_final" ~ "HS Final",
+    term == "nterr_dens_buffer50_last" ~ "TerrDens Final",
+    term == "sexm:seasonWinter" ~ "sex*season[m*w]")) %>%
+  mutate(Variable_name = Variable_name %>% 
+           fct_relevel("sex*season[m*w]", "TerrDens Final")) %>% 
+  mutate(significant = case_when(
+    p.value < 0.05 ~ "Yes",
+    TRUE ~ "No")) %>% 
+  mutate(estimate2 = round(estimate, 2),
+         conflow2 = round(conf.low, 2),
+         confhigh2 = round(conf.high, 2))
+
+
+# Forest Plot
+str(toplot_pop_rn)
+
+zp1 <- ggplot(toplot_pop_rn, aes(group = as.factor(model), 
+  colour = as.factor(model))) + 
+  # future vertical line at 1
+  geom_hline(yintercept = 1, colour = "darkred", alpha = 0.5, lty = 2) +
+  # line of 95 CI
+  geom_linerange(aes(x = Variable_name, ymin = conflow2,
+                                ymax = confhigh2), 
+                            lwd = 1.5, position = position_dodge(width = -0.8/2)) +
+  # # this is the coefficient. No so important the values of ymin and ymax
+  geom_pointrange(aes(x = Variable_name, y = estimate2, ymin = conflow2,
+                                 ymax = confhigh2, fill = significant),
+                             lwd = 1/2, shape = 21, position = position_dodge(width = -0.8/2)) +
+  # make it vertical
+  xlab("") +
+  ylab("Hazard Ratio") +
+  coord_flip() + 
+  # color for significant
+  scale_fill_manual(values = c("White", "black"), 
+                    name = "Significant")+
+  scale_color_manual(values = scico(4, begin = 0.15, palette = "tokyo"), 
+                     name = "Age class") +
+  theme(
+    panel.background = element_rect(fill = NA),
+    panel.grid.major = element_blank(), 
+    axis.line = element_line(colour = "black"),
+    legend.background = element_blank(),
+    axis.title = element_text(colour = "black", size = 14, face = "bold"),
+    axis.text = element_text(colour = "black", size = 14),
+    legend.title = element_text(colour = "black", size = 12, face = "bold"),
+    legend.text = element_text(colour = "black", size = 12)) 
+
+zp1
+
+# save plot
+# ggsave(plot = zp1, paste0(plot_wd, "/Plot_survival_allpopulation_HR_pretty_scl.png"),
+#        dpi = 600, height = 6, width = 8)
+```

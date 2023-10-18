@@ -1,0 +1,436 @@
+---
+title: "reproduction"
+author: "Aimara Planillo"
+date: "2023-06-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r prepare workspace}
+source("./R/source_packages.R")
+ 
+procdata_wd <- file.path("./data_proc")
+plot_wd <- file.path("./output/figures/")
+tmp_wd <- file.path("./output/tmp_output/")
+table_wd <- file.path("./output/tables")
+```
+
+# Reproduction analysis
+
+
+**RESPONSE**
+- Proportion of territories with reproduction / Probability of reproduction in a territory
+- Number of pups for territories with reproduction 
+
+**EXPLANATORY**
+- Experience of breeding female (years of reproduction)
+- Habitat suitability (in 8 km radius of centroid of territory)
+- Wolf density in 50km radius (assuming mirror situation in Poland)
+
+As the territories were not all followed for the same number of years, we are going to use the number of years that 
+a territory was monitored as a weighting variable in the analysis
+
+## load and prepare reproduction data
+```{r load and prepare data}
+repro_tmp <- read.csv(paste0(procdata_wd, "/data_wolf_reproduction_table.csv"))
+
+head(repro_tmp)
+str(repro_tmp)
+nrow(repro_tmp)
+
+repro_tmp %>% 
+  group_by(TerrID) %>% 
+  summarise(n = n()) %>% 
+  arrange(-n)
+
+length(unique(repro_tmp$TerrID)) # 165
+
+repro_tmp %>% 
+  group_by(sYear) %>% 
+  summarise(n = n()) %>% 
+  as.data.frame()
+```
+
+
+```{r}
+# add number of years for each territory
+nyears2 <- repro_tmp %>% 
+  group_by(TerrID) %>% 
+  summarise(Terr_years = n()) %>% 
+  arrange(-Terr_years)
+
+wolf_repro <- repro_tmp %>% 
+  left_join(nyears2, by = "TerrID")
+
+head(wolf_repro)
+```
+
+Summaries data
+```{r}
+# N territories
+wolf_repro %>% 
+  group_by(TerrID) %>% 
+  summarise(n = n()) %>% 
+  summarise(n = n())
+
+# N different breeding females
+wolf_repro %>% 
+  group_by(FemID) %>% 
+  summarise(n = n()) %>% 
+  summarise(n = n())
+
+# n years per territory
+wolf_repro %>% 
+  group_by(TerrID) %>% 
+  summarise(n = n()) %>% 
+  group_by(n) %>% 
+  summarise(nterr = n())
+
+# n years per female
+wolf_repro %>% 
+  group_by(FemID) %>% 
+  summarise(n = n()) %>% 
+  group_by(n) %>% 
+  summarise(nfem = n())
+
+# n pups per reproduction
+wolf_repro %>% 
+  filter(Repro == 1) %>% 
+  summarise(npups = mean(Npups), 
+            sdpups = sd(Npups))  
+```
+
+After removing unknown females: 
+165 territories, 201 known females, maximum 16 years for one territory, 10 years for one female
+
+     npups   sdpups
+1 4.075728 2.043328
+
+## Explore variable correlation  
+
+```{r variable correlation}
+## check correlations
+cor_variables <- wolf_repro %>% 
+  dplyr::select(FemExp = Delta_bfem, HS = hs_8km,
+                TerrDens = densTerr_50km, Terr_years)
+
+cor_table <- cor(cor_variables)
+# plot correlation
+ggcorrplot(cor_table, hc.order = FALSE, type = "lower",
+   lab = TRUE, outline.color = "white", 
+   lab_size = 6, tl.cex = 13) +
+  theme(plot.background = element_rect(colour = "white"), 
+        legend.title = element_text(size = 14)) 
+
+ggsave(paste0(tmp_wd, "/Repro_variables_correlations_20230912.png"),
+       dpi = 600, height = 6, width = 6)
+```
+No strong correlation among the variables
+
+
+## model selection list
+```{r model list}
+## Model selection list, similar to survival models
+head(wolf_repro)
+
+## for number of pups
+mod_list_npups <- c(
+  "full_model" = as.formula(Npups ~ hs_8km * densTerr_50km   + 
+                              hs_8km  * (Delta_bfem  + I(Delta_bfem^2)) + 
+                              (1|TerrID)), 
+  "additive_model" = as.formula(Npups ~ hs_8km + densTerr_50km  + 
+                                  Delta_bfem  + I(Delta_bfem^2) + (1|TerrID)),
+  "hs_model" = as.formula(Npups ~ hs_8km  + (1|TerrID)),
+  "density_model" = as.formula(Npups ~ densTerr_50km  + (1|TerrID )),
+  "agefem_quad_model" = as.formula(Npups ~ Delta_bfem + I(Delta_bfem^2) + (1|TerrID)),
+  "agefem_model" = as.formula(Npups ~ Delta_bfem + (1|TerrID)),
+  "null_model" = as.formula(Npups ~ 1 + (1|TerrID))
+)
+
+# store in text model for later use
+form_text <- vector()
+for(i in 1:length(mod_list_npups)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_npups[[i]]))
+}
+mod_npups_form_table <- cbind.data.frame(Modnames = names(mod_list_npups), 
+                                       Modformula = form_text)
+
+## Reproduction probability
+mod_list_parepro <- c(
+  "full_model" = as.formula(Repro_event ~ hs_8km  * densTerr_50km  + 
+                              hs_8km  * (Delta_bfem  + I(Delta_bfem^2)) + (1|TerrID)), 
+  "additive_model" = as.formula(Repro_event ~ hs_8km  + densTerr_50km  +
+                                  Delta_bfem  + I(Delta_bfem^2) + (1|TerrID)),
+  "hs_model" = as.formula(Repro_event ~ hs_8km  + (1|TerrID)),
+  "density_model" = as.formula(Repro_event ~ densTerr_50km  + (1|TerrID)),
+  "agefem_quad_model" = as.formula(Repro_event ~ Delta_bfem + I(Delta_bfem^2) + (1|TerrID)),
+  "agefem_model" = as.formula(Repro_event ~ Delta_bfem + (1|TerrID)),
+  "null_model" = as.formula(Repro_event ~ 1 + (1|TerrID))
+)
+
+# store in text model for later use
+form_text <- vector()
+for(i in 1:length(mod_list_parepro)){
+  form_text[i] <- Reduce(paste, deparse(mod_list_parepro[[i]]))
+}
+
+mod_parepro_form_table <- cbind.data.frame(Modnames = names(mod_list_parepro), 
+                                       Modformula = form_text)
+```
+
+## Models for prob reproduction
+```{r Models for pa reproduction}
+## Analyse presence/absence reproduction
+##scale data
+wolf_repro_pa_scl <- wolf_repro %>% 
+  mutate(Repro_event = case_when(
+    Repro == 1 ~ 1,
+    TRUE ~ 0)) %>% 
+  mutate(hs_8km = scale(hs_8km),
+         densTerr_50km = scale(densTerr_50km),
+         Delta_bfem = scale(Delta_bfem)) %>% 
+  ## add number of successes per territory as weights due to binomial distribution
+  group_by(TerrID) %>% 
+  mutate(terr_weights = sum(Repro_event)) %>% 
+  ungroup()
+
+## run models
+parepro_all_models <- lapply(mod_list_parepro, function(x){glmer(x, data = wolf_repro_pa_scl, 
+                                                        family = "binomial", 
+                                                        control = glmerControl(optimizer="bobyqa"),
+                                                        weights = Terr_years/max(Terr_years))})
+
+summary(parepro_all_models$density_model)
+
+parepro_aictab <- aictab(parepro_all_models, second.ord = TRUE)
+parepro_aictab
+
+parepro_aictab <- parepro_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_parepro_form_table, by = "Modnames")
+write.csv(parepro_aictab, paste0(table_wd, "/Table_repro_prob_modsel_weights_20231010.csv"), row.names = FALSE)
+
+## best model: Density model but very close to NULL MODEL!!
+parepro_aictab[1:2,]
+```
+
+Best model is the density model 
+Second best is the null female
+
+
+## get base probability of reproduction from the null model
+```{r null model and backtransform coefficients}
+wolf_repro_dataset_pa <-  wolf_repro %>% 
+  mutate(Repro_event = case_when(
+    Repro == 1 ~ 1,
+    TRUE ~ 0)) %>% 
+  group_by(TerrID) %>% 
+  mutate(Terr_years = n(), 
+         terr_weights = sum(Repro_event)) %>% 
+  ungroup()
+
+parepro_aictab[1,]
+
+null_repro <- glmer(Repro_event ~ 1 + (1 | TerrID),
+            data = wolf_repro_dataset_pa,
+            # control = glmerControl(optimizer="bobyqa"),
+            family = "binomial",
+            weights = Terr_years/max(Terr_years))
+summary(null_repro)
+
+saveRDS(null_repro, paste0(tmp_wd, "/Repro_prob_nullModel_model_weights_20231010.rds"))
+
+## get model coefficients
+coefs_repromodel <- broom.mixed::tidy(null_repro)
+write.csv(coefs_repromodel, paste0(table_wd, "/Table_repro_prob_nullModel_coeff_weights_20231010.csv"), 
+          row.names = FALSE)
+
+
+## backtransform intercept to probabilities
+int_coef <- null_repro@beta
+
+odds <- exp(int_coef)
+prob <- odds / (1+odds)
+prob
+# 0.8997892 
+```
+Intercept: base probability of reproduction a year: 0.90
+
+
+```{r best model - terr density}
+## best model: !!
+parepro_aictab[1,]
+
+best_repro_model <- glmer(Repro_event ~ scale(densTerr_50km) + (1 | TerrID),
+            data = wolf_repro_dataset_pa,
+             control = glmerControl(optimizer="bobyqa"),
+            family = "binomial",
+            weights = Terr_years/max(Terr_years))
+
+summary(best_repro_model)
+plot(ggeffect(best_repro_model))
+```
+
+Althought probability of reproduction seems to increase with density, not significant effect
+
+```{r Plot model pa reproduction}
+pdt <- ggeffect(best_repro_model, terms = "densTerr_50km") %>% 
+ggplot(aes(x = x, y = predicted)) +
+  geom_line(col = "brown", linewidth = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high),
+              fill = "grey40", alpha = 0.25) +
+  ylab("Probability of Reproduction") +
+  coord_cartesian(ylim = c(0.70, 1)) +
+  xlab("Territory density") +
+  ggtitle("") +
+    theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    axis.line = element_line("black"),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 12)
+  )
+
+ggsave(plot = pdt,
+       filename = paste0(plot_wd, "/Plot_prob_model_effects_density_weights_20231010.png"),
+       dpi = 600, height = 4, width = 4)
+```
+
+
+
+## models for N pups
+
+```{r Models N pups}
+## only for those cases with pups (removing the zeros)
+##scale data
+wolf_repro_scl <- wolf_repro %>% 
+  filter(!is.na(Npups)) %>% 
+  filter(Npups > 0) %>% 
+  mutate(hs_8km = scale(hs_8km)[,1],
+         densTerr_50km = scale(densTerr_50km)[,1],
+         Delta_bfem = scale(Delta_bfem)[,1]) %>% 
+  group_by(TerrID) %>% 
+  mutate(terr_weights = n()) %>% 
+  ungroup()
+
+## run models
+npup_all_models <- lapply(mod_list_npups, function(x){glmer(x, data = wolf_repro_scl, 
+                                                        family = "poisson",
+                                                        weights = Terr_years )})
+
+npup_aictab <- aictab(npup_all_models, second.ord = TRUE)
+npup_aictab
+
+npup_aictab <- npup_aictab %>% 
+  as.data.frame() %>% 
+  left_join(mod_npups_form_table, by = "Modnames")
+write.csv(npup_aictab, paste0(table_wd, "/Table_repro_npups_modsel_weights_20231010.csv"), row.names = FALSE)
+
+## best model
+npup_aictab[1,]
+# we run it scaling within the formula to plot with real values later
+
+## select only observations with reproduction
+wolf_repro_withpups <- wolf_repro %>% 
+  filter(!is.na(Npups)) %>% 
+  filter(Npups > 0) %>% 
+   group_by(TerrID) %>% 
+  mutate(Terr_years = n()) %>% 
+  ungroup()
+
+
+#full model
+Npups_model <- glmer(Npups ~ scale(hs_8km) * scale(densTerr_50km) + 
+                       scale(hs_8km) * (scale(Delta_bfem) + scale(I(Delta_bfem^2))) + 
+                       (1|TerrID),
+            data = wolf_repro_withpups,
+            family = "poisson", 
+            weights = Terr_years)
+
+summary(Npups_model)
+saveRDS(Npups_model, paste0(tmp_wd, "/Repro_Npups_bestModel_model_weights_20231010.rds"))
+## get model coefficients
+coefs_pupmodel <- broom.mixed::tidy(Npups_model)
+write.csv(coefs_pupmodel, paste0(table_wd, "/Table_repro_npups_model_BEST_coeff_weights_20231010.csv"), 
+          row.names = FALSE)
+```
+
+```{r Plot model N pups with both interactions}
+# linear effects
+plot(ggeffect(Npups_model))
+# interaction effects
+plot(ggeffect(Npups_model, terms = c("densTerr_50km", "hs_8km")))
+plot(ggeffect(Npups_model, terms = c("Delta_bfem", "hs_8km")))
+
+
+phs_dt <- ggeffect(Npups_model, terms = c("densTerr_50km", "hs_8km")) %>% 
+ggplot(aes(x = x, y = predicted, colour = group, fill = group)) +
+  geom_line(linewidth = 1, aes (linetype = group)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), col = "transparent", alpha = 0.25) +
+  scale_colour_manual(values = c("palevioletred4", "tan", "seagreen"), name = "Habitat \nSuitability") +
+  scale_fill_manual(values = c("palevioletred4", "tan", "seagreen"), name = "Habitat \nSuitability") +
+  scale_linetype_manual(values = c(3,2,1),  name = "Habitat \nSuitability") +
+  guides(colour = guide_legend(reverse = TRUE),
+         fill = guide_legend(reverse = TRUE), 
+         linetype = guide_legend(reverse = TRUE)) +
+  ylab("Number of pups") +
+  coord_cartesian(ylim = c(2, 5.5)) +
+  xlab("Territory Density") +
+  ggtitle("") +
+   theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    panel.background = element_rect(fill = "white", colour = NULL),
+    axis.line = element_line("black"),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12, face = "bold")
+  )
+phs_dt
+
+
+pda_dt <- ggeffect(Npups_model, terms = c("Delta_bfem", "hs_8km")) %>% 
+ggplot(aes(x = x, y = predicted, colour = group, fill = group)) +
+  geom_line(linewidth = 1, aes (linetype = group)) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), col = "transparent", alpha = 0.25) +
+  scale_colour_manual(values = c("palevioletred4", "tan", "seagreen"), name = "Habitat \nSuitability") +
+  scale_fill_manual(values = c("palevioletred4", "tan", "seagreen"), name = "Habitat \nSuitability") +
+  scale_linetype_manual(values = c(3,2,1),  name = "Habitat \nSuitability") +
+  guides(colour = guide_legend(reverse = TRUE),
+         fill = guide_legend(reverse = TRUE), 
+         linetype = guide_legend(reverse = TRUE)) +
+  ylab("Number of pups") +
+  coord_cartesian(ylim = c(2, 6.5)) +
+  xlab("Experience of Breeding female") +
+  ggtitle("") +
+  theme_bw() +
+  theme(
+    panel.border = element_blank(),
+    panel.background = element_rect(fill = "white", colour = NULL),
+    axis.line = element_line("black"),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 12),
+    legend.title = element_text(size = 12, face = "bold")
+  )
+
+pda_dt
+
+newplot <- ggarrange(phs_dt, pda_dt, ncol = 2, 
+                     common.legend = TRUE, legend = "right") +
+  theme(panel.background = element_rect(fill = "white", colour = NULL)) 
+
+newplot <- (phs_dt + pda_dt) +
+  plot_annotation(tag_levels = "a") & theme(plot.tag = element_text(face = 'bold'), 
+                                            legend.position = "right") 
+newplot <- newplot + plot_layout(guides = "collect")
+
+ggsave(plot = newplot,
+       filename = paste0(plot_wd, "/Plot_npups_model_effects_weights_20231010.png"),
+       dpi = 600, height = 4, width = 8)
+```
+

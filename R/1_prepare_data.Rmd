@@ -1,0 +1,788 @@
+---
+title: "prepare_data"
+author: "Aimara Planillo"
+date: "2023-06-07"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r set workspace}
+source("./R/source_packages.R")
+
+procdata_wd <- file.path("./data_proc")
+```
+
+
+# Prepare wolf data for demographic analysis
+
+In all cases, we are going to use the monitoring or wolf year: 1st May - 31st April next year
+For example, year 2020 refers to teh time between 1st May 2020 and 31st April 2021
+
+
+# Prepare Survival Data
+
+We are going to prepare the data for the analysis. For this, 
+we filter the unusable records and add the neccesary information.
+In summary, final dataset will have:
+- All individuals born before 2021 and with known birth date
+- Only individuals in Germany (due to explantory variables)
+- We use standard birth date: 1. May
+- We use SDat2 as last date: death for dead ind, and last date for censored ind
+- We assume death within a week of last date
+- Prepare the response variable
+- Add the explanatory variables: habitat suitability, territory density, sex, age, season
+
+
+**RESPONSE variable**
+weeks_date: 
+- Number of weeks since birth until death of last record of the individual
+
+**EXPLANATORY variables**
+_Status_: 
+- Dead = 1
+- Alive = Censored = 0
+
+_Sex_: 
+- male  
+- female 
+
+_Season_:
+- Summer = May-Oct (when new pups are born and stay with pack)
+- Winter = Nov-Apr 
+
+_Characteristics of Natal territory_: coord_x_first, coord_y_first
+- Definition of natal territory: 
+    - Coordinates of birth if exist
+    - First Known location when no birth coordinates are provided
+- _Natal territory HS_: Average habitat suitability values in buffer of 8km (represents territory)
+- _Natal territory density_: Territory density in buffer of 50 km in the birth year
+
+_Characteristics of Final territory_: coord_x_last, coord_y_last
+- Definition of final territory: 
+    - Coordinates of death if exist
+    - Last known location when no death coordinates are provided
+- _Final territory HS_: Average habitat suitability values in buffer of 8km (represents territory)
+- _Final territory density_:Territory density in buffer of 50 km in the death or last record year
+
+
+## Load and prepare data frame
+```{r}
+rawsurv <- read.csv("./data_raw/data_survival_rawtable.csv")
+
+# set unclear Sex cases to NA
+surv_sex_tmp <- rawsurv %>% 
+  mutate(Sex = ifelse(Sex == "m?" | Sex == "f?", NA, Sex))
+
+# remove individuals that were born in 2021 or later and undefined Sex
+surv_2021_tmp <- surv_sex_tmp %>%
+  filter(!is.na(Sex)) %>% 
+  filter(ju_end < 2021) 
+
+table(surv_2021_tmp$Sex)
+
+# remove individuals with unknown year of birth
+surv_2021_birth <- surv_2021_tmp %>% 
+  filter(ju_start == ju_end)
+
+## get coordinates of wolves: birth place is known. If unknown, first known location
+surv_coord <- surv_2021_birth %>%
+  mutate(coord_x_first = case_when(
+    birth_x != "not.found" ~ as.numeric(birth_x), 
+    birth_x == "not.found" ~ first_x), 
+    coord_y_first = case_when(
+    birth_y != "not.found" ~ as.numeric(birth_y), 
+    birth_y == "not.found" ~ first_y)) %>% 
+  mutate(coord_x_last = last_x, 
+         coord_y_last = last_y)
+
+## check for missing coordinates
+surv_coord %>% 
+  filter(is.na(coord_x_first)) # these are individuals with origin outside Germany
+
+surv_coord %>% 
+  filter(is.na(coord_x_last)) # these are individuals with only one sighting
+
+nrow(surv_coord) # 1098
+
+head(surv_coord)
+
+## add bird date, death date and number of weeks of data
+surv_dates_tmp <- surv_coord %>% 
+  ## add dates
+  mutate(birth_date_char = paste0("01.05.", ju_end),
+         SDat2_char = as.character(SDat2),
+         birth_date = as.Date(birth_date_char, format = "%d.%m.%Y"), 
+         last_date = as.Date(SDat2_char, format = "%Y%m%d")) %>% 
+  ## add month of death (for season)
+  mutate(death_month = month(last_date)) %>% 
+  ## add years of birth and death
+  # they are born at the beginnig of hte wolf year but
+  # Because we are using monitoring years, we need to transform the death year to monitoring year 
+  mutate(birth_year = year(birth_date), 
+         death_year = case_when(
+    month(last_date) < 5 ~ year(last_date)-1,
+    month(last_date) > 4 ~ year(last_date))) %>%
+  ## add response variable: weeks alive (weeks_date)
+  mutate(weeks_date = interval(birth_date, last_date) %/% weeks(1)) %>% 
+  # add status first base on Mortality on april 2021
+  mutate(status = case_when(
+    Mortality_2020 == "alive" ~ 0, 
+    Mortality_2020 == "verified" ~ 1, 
+    Mortality_2020 == "unverified" ~ 0)
+  ) %>% 
+  mutate(season = case_when(
+    death_month %in% c(5:10) ~ "Summer",
+    death_month %in% c(1:4, 11,12) ~ "Winter"
+    )) %>% 
+  ## keep only relevant variables
+    dplyr::select(Individual, Pack_origin, weeks_date, status, 
+                coord_x_first, coord_y_first, coord_x_last, coord_y_last, 
+                Sex, birth_date, birth_year, last_date, death_year, death_month, 
+                SDat1, SDat2, MJ1, MJ2, season, region_origin)
+
+head(surv_dates_tmp)
+nrow(surv_dates_tmp) # 1098
+
+surv_dates_tmp %>% 
+  filter(!is.na(coord_x_last))
+
+# add last location = first location for individuals with only one data
+surv_dates_tmp2 <- surv_dates_tmp %>% 
+  mutate(coord_x_last = case_when(
+    is.na(coord_x_last) & MJ1 == MJ2 ~ coord_x_first,
+    TRUE ~ coord_x_last)) %>% 
+  mutate(coord_y_last = case_when(
+    is.na(coord_y_last) & MJ1 == MJ2 ~ coord_y_first,
+    TRUE ~ coord_y_last))
+
+
+# Remove individuals with negative weeks, as this is a mistake in the data
+surv_dates_tmp2 %>% 
+  filter(weeks_date < 0)
+
+nrow(surv_dates_tmp2) # 1098
+str(surv_dates_tmp2)
+
+## remove unknown coordinates and ind from outside germany
+unique(surv_dates_tmp2$region_origin)
+
+surv_dates_tmp3 <- surv_dates_tmp2 %>% 
+  filter(!is.na(coord_x_first)) %>%
+  filter(!region_origin %in% c("EU_DK", "EU_NW", "EU_ME"))
+
+nrow(surv_dates_tmp3) # [1] 1061
+unique(surv_dates_tmp3$region_origin)
+
+surv_dates_tmp3 %>% 
+  group_by(region_origin) %>% 
+  summarise(n = n())
+
+## assign 2020 as last effective year
+surv_dates_tmp3 <- surv_dates_tmp3 %>% 
+  mutate(eff_last_year = case_when(
+    death_year < 2021 ~ as.numeric(death_year),
+    death_year > 2020 ~ 2020))
+```
+
+## SPATIAL DATA
+
+### Divide data into first and last locations and make spatial
+
+```{r Check that all individuals are in Germany}
+## load german border
+german_states <- read_sf("./data_raw/sf_german_regions_3035.gpkg", crs = 3035)
+
+## make coordinates spatial objects
+first_sf <- st_as_sf(surv_dates_tmp3, coords = c("coord_x_first", "coord_y_first"), crs = 4326) %>% 
+  st_transform(crs = 3035)
+last_sf <- st_as_sf(surv_dates_tmp3, coords = c("coord_x_last", "coord_y_last"), crs = 4326) %>% 
+  st_transform(crs = 3035)
+
+last_sf %>% filter(Individual == "GW1905f")
+  
+tmap_mode("view")
+tm_shape(german_states) +
+  tm_borders() +
+tm_shape(first_sf) +
+  tm_dots("red", size = 0.2) + 
+  tm_shape(last_sf) +
+  tm_dots(size = 0.1)
+
+## We see some data outside the German borders
+```
+
+### Remove individuals outside Germany
+```{r remove outside german locations}
+## extract regions for first locations
+out_first <- st_intersection(first_sf, german_states)
+out_first
+
+out_first %>% 
+    filter(Individual == "GW1267m")
+## assign region of death to individuals
+out_last_tmp <- st_intersection(last_sf, german_states) %>% 
+  dplyr::select(Individual, name) %>% 
+  st_drop_geometry()
+out_last_tmp
+
+out_last <- last_sf %>% 
+  left_join(out_last_tmp, by = "Individual") %>% 
+  mutate(region_death = name)
+
+nrow(out_first) # [1] 1061
+nrow(out_last) # [1] 1061
+
+tm_shape(german_states) +
+  tm_borders() +
+tm_shape(out_first) +
+  tm_dots("red", size = 0.2) + 
+  tm_shape(out_last) +
+  tm_dots(size = 0.1)
+```
+
+
+### Add Habitat suitability data 
+
+```{r add habitat suitability values}
+## load habitat suitability map (values*1000)
+hs_map <- rast("./data_raw/ensemble_samebgpres_weightedmean_projection_3035.tif")
+hs_map
+plot(hs_map)
+
+## see points of first and last location of individuals
+tmap_mode("view")
+tm_shape(hs_map) +
+  tm_raster(palette = "viridis", alpha = 0.2) + 
+  tm_shape(german_states) +
+  tm_fill("name", alpha = 0.2) +
+  tm_shape(out_first) +
+  tm_dots("green") +
+  tm_shape(out_last) +
+  tm_dots("black")
+
+## extract habitat suitability values in radius of 8 km of wolf first location
+buffer_first <- st_buffer(out_first, dist = 8000) %>% 
+  st_transform(3035)
+
+buffer_first_hs <- exactextractr::exact_extract(hs_map, buffer_first, fun = "mean")
+
+nrow(out_first) # 1061
+length(buffer_first_hs) # 1061
+
+first_hs <- out_first %>% 
+  mutate(hs_8km_natal = buffer_first_hs / 1000)   # we set the hs values from 0 to 1 (original scale)
+
+## extract habitat suitability values in radius of 8 km of wolf last location
+buffer_last <- st_buffer(out_last, dist = 8000) %>% 
+  st_transform(3035)
+
+buffer_last_hs <- exactextractr::exact_extract(hs_map, buffer_last, fun = "mean")
+
+nrow(out_last) # 1061
+length(buffer_last_hs)  # 1061
+
+last_hs <- out_last %>% 
+  mutate(hs_8km_final = buffer_last_hs / 1000)  # we set the hs values from 0 to 1 (original scale)
+
+## remove points with no data
+last_hs <- last_hs %>% 
+  filter(!is.na(hs_8km_final))
+nrow(last_hs) # 1054
+```
+
+### Add wolf territory density in 50km radius of focal territory
+
+```{r load territory data}
+## load german border to cut buffers
+german_border <- st_read("./data_raw/germany_3035.gpkg", crs = 3035)
+plot(german_border)
+
+## get territory data and make spatial data
+wolf_terr_df <- read.csv("./data_raw/20220719_Territorien DBBW.csv")  #status 1-pack, 2-pair, 3-ind
+
+## make wolf territory spatial, and remove single territories 
+wolf_terr_sf <- wolf_terr_df %>% 
+  # remove data after year 2020
+  filter(Mjahr < 2021) %>% 
+  # remove single territorial individuals
+  filter(Status != 3) %>% 
+  # make spatial object
+  st_as_sf(coords = c("DECLNG", "DECLAT"), crs = 4326) %>% 
+  # transform to projected coordinates
+  st_transform(crs = 3035)
+
+head(wolf_terr_df)
+```
+
+```{r get wolf density values in radius of first territory}
+first_hs_3035 <- st_transform(first_hs, 3035)
+
+## create a loop to extract the territory info for each year of first location
+nyears_first <- length(unique(first_hs_3035$birth_year))
+
+total_area_buffer50 <- pi*50^2
+all_years_first_df <- data.frame()
+
+for (i in 1:nyears_first){
+  # select the year
+  tmp_year = unique(first_hs_3035$birth_year)[i]
+  
+  # get individual 50km buffers in year
+  poly50_tmp <- first_hs_3035 %>% 
+    filter(birth_year == tmp_year) %>% 
+    st_buffer(dist = 50000) 
+  
+  # remove the area of the buffers outside germany
+  poly50_tmp_crop <- st_intersection(poly50_tmp, german_border)
+  
+  # add real area for each buffer in km2
+  poly50_tmp_crop <- poly50_tmp_crop %>% 
+    mutate(area_km2 = as.numeric(
+      st_area(poly50_tmp_crop) %>% 
+        set_units(km^2)))
+  
+  # get territory (packs and pairs) polygons in year
+  wolf_terr_tmp <- wolf_terr_sf %>% 
+    filter(Mjahr == tmp_year) %>% 
+    st_buffer(dist = 8000)
+  
+  # get number of territory polygons intersecting the individual buffer
+  intersect50_tmp <- st_intersects(poly50_tmp_crop, wolf_terr_tmp)
+  n_int50_tmp <- lengths(intersect50_tmp)
+  
+  # make into a dataframe
+  my_df_tmp <- cbind.data.frame(Individual = poly50_tmp$Individual,
+                          nterr_buffer50_first = n_int50_tmp, 
+                          area_buffer50_first = poly50_tmp_crop$area_km2,
+                          Myear_first = tmp_year) 
+  # get territory density using buffer size
+  my_df_tmp_dens <- my_df_tmp %>% 
+    mutate(nterr_dens_buffer50_first = nterr_buffer50_first / (area_buffer50_first) * total_area_buffer50) # Nterritories in full buffer area
+  
+  all_years_first_df <- rbind(all_years_first_df, my_df_tmp_dens)
+  }
+
+
+head(all_years_first_df)
+nrow(all_years_first_df) #1061
+nrow(first_hs_3035) #1061
+
+unique(first_hs_3035$birth_year)
+unique(all_years_first_df$Myear_first)
+
+## joint n terr to data
+first_hs_nterr <- first_hs_3035 %>% 
+  left_join(all_years_first_df, by = c("Individual", "birth_year" = "Myear_first"))
+
+nrow(first_hs_nterr) #1061
+```
+
+
+```{r get wolf density values in radius of last territory}
+last_hs_3035 <- st_transform(last_hs, 3035)
+
+nyears_last <- length(unique(last_hs_3035$eff_last_year ))
+
+total_area_buffer50 <- pi*50^2
+
+all_years_last_df <- data.frame()
+
+for (i in 1:nyears_last){
+  # select the year
+  tmp_year = unique(last_hs_3035$eff_last_year)[i]
+  
+  # get individual 50km buffers in year
+  poly50_tmp <- last_hs_3035 %>% 
+    filter(eff_last_year == tmp_year) %>% 
+    st_buffer(dist = 50000)
+  
+  # remove the area of the buffers outside germany
+  poly50_tmp_crop <- st_intersection(poly50_tmp, german_border)
+  
+  # add real area for each buffer in km2
+  poly50_tmp_crop <- poly50_tmp_crop %>% 
+    mutate(area_km2 = as.numeric(
+      st_area(poly50_tmp_crop) %>% 
+        set_units(km^2)))
+  
+  # get territory (packs and pairs) polygons in year
+  wolf_terr_tmp <- wolf_terr_sf %>% 
+    filter(Mjahr == tmp_year) %>% 
+    st_buffer(dist = 8000)
+  
+  # get number of territory polygons intersecting the individual buffer
+  intersect50_tmp <- st_intersects(poly50_tmp_crop, wolf_terr_tmp)
+  n_int50_tmp <- lengths(intersect50_tmp)
+  
+  # make into a dataframe
+  my_df_tmp <- cbind.data.frame(Individual = poly50_tmp$Individual,
+                          nterr_buffer50_last = n_int50_tmp, 
+                          area_buffer50_last = poly50_tmp_crop$area_km2,
+                          Myear_last = tmp_year) 
+  # get territory density using buffer size
+  my_df_tmp_dens <- my_df_tmp %>% 
+    mutate(nterr_dens_buffer50_last = nterr_buffer50_last / (area_buffer50_last) * total_area_buffer50) #n territories in 100km2
+           
+  all_years_last_df <- rbind(all_years_last_df, my_df_tmp_dens)
+  }
+
+all_years_last_df
+nrow(all_years_last_df) #1054
+nrow(last_hs_3035) #1054
+
+unique(last_hs_3035$death_year)
+unique(all_years_last_df$Myear_last)
+
+## joint n terr to data
+last_hs_nterr <- last_hs_3035 %>% 
+  left_join(all_years_last_df, by = c("Individual", "eff_last_year" = "Myear_last"))
+```
+
+```{r put together and save data}
+## get individual ID
+ind_first <- unique(first_hs_nterr$Individual)
+ind_last <- unique(last_hs_nterr$Individual)
+
+## retain only individuals in both datasets
+ind_tokeep <- ind_first[which(ind_first %in% ind_last)]
+length(ind_tokeep) # 1053
+
+tmp_first <- first_hs_nterr %>% 
+  filter(Individual %in% ind_tokeep) %>% 
+  st_drop_geometry()
+
+tmp_last <- last_hs_nterr %>% 
+  filter(Individual %in% ind_tokeep) %>% 
+  st_drop_geometry()
+
+## merge datasets
+
+surv_data <- tmp_first %>% 
+  left_join(tmp_last %>% dplyr::select(Individual, coord_x_first, coord_y_first, 
+                                       hs_8km_final, nterr_buffer50_last, area_buffer50_last, 
+                                       nterr_dens_buffer50_last), 
+            by = "Individual")
+head(surv_data)
+nrow(surv_data) # 1054
+```
+
+```{r save data}
+# save data for later use
+write.csv(surv_data, paste0(procdata_wd, "/data_wolf_survival_hs_nterr.csv"),
+                 row.names = FALSE)
+```
+
+```{r remove sensitive info}
+surv_data_git <- surv_data %>% 
+  mutate(IndID = seq(1, nrow(surv_data))) %>% 
+  dplyr::select(IndID, weeks_date, status, sex = Sex,  
+                birth_date, birth_year, last_date, death_year, death_month, 
+                season, hs_8km_natal, hs_8km_final,
+                nterr_buffer50_first, area_buffer50_first, nterr_dens_buffer50_first,
+                nterr_buffer50_last, area_buffer50_last, nterr_dens_buffer50_last)
+
+write.csv(surv_data_git, paste0(procdata_wd, "/data_wolf_survival_table.csv"),
+                 row.names = FALSE)
+```
+
+
+# Prepare Reproduction Data
+
+Data used in a parallel approach to survival analysis. Raw data in the monitoring 
+data for the wolf territories in Germany. From this, we use:
+- Data before year 2021
+- Remove single wolves territories (status 3)
+- For pair territories (status 2), removed first year 
+- Removed territories with 10+ pups (welpen) because we do not have the identities of all reproducing females in territories with multiple reproductions
+
+For pair territories, we need to remove the first year for the reproduction analysis, as they are 
+assigned as pair territories retroactively after observing reproduction in the following year and, thus, 
+they cannot reproduce in the first year they appear in the database. 
+
+We will analyse the probability of reproduction in a territory and the number of pups per reproduction event 
+in relation with habitat suitability, territory density, and experience of breeding female 
+
+**RESPONSE variables**
+- Probability of reproduction in a territory
+- Number of pups for territories with reproduction 
+
+**EXPLANATORY variables**
+- Experience of breeding female (number of years of reproduction), in quadratic form to account for potential optimal time
+- Habitat suitability of focal territory (8 km radius of centroid)
+- Territory density in radius of 50 km of the focal territory
+
+
+## Load and prepare reproduction data
+
+```{r load and prepare data}
+repro_raw <- read.csv("./data_raw/20220719_Territorien DBBW.csv")
+
+head(repro_raw)
+str(repro_raw)
+nrow(repro_raw) # [1] 1138
+
+## remove events with 10+ pups
+repro_tmp <- repro_raw %>% 
+  filter(Mjahr < 2021) %>%
+  mutate(Npups = case_when(
+    is.na(Welpen) ~ 0, 
+    TRUE ~ Welpen)) %>% 
+  filter(Npups < 10)
+nrow(repro_tmp)
+
+## get pack reproduction  
+repro_data_packs <- repro_tmp  %>% 
+  filter(Status == 1) %>%  # select only pack data
+  filter(Mjahr < 2021)
+nrow(repro_data_packs) # 694 rows for pack data
+
+# Get pair reproduction data, remove first year (status = 2)
+repro_data_pairs <- repro_tmp %>% 
+  filter(Status == 2) %>% 
+  filter(Mjahr < 2021) %>% 
+  group_by(Territorium, Faehe, Ruede) %>% 
+  filter(Mjahr != min(Mjahr))
+nrow(repro_data_pairs) # 25 rows for pair reproducing
+
+## Put both datasets together and select only relevant variables
+repro_data <- rbind(repro_data_packs, repro_data_pairs)
+nrow(repro_data)
+# [1] 719
+
+# get total territories
+repro_data %>% 
+  group_by(Territorium) %>% 
+  summarise(n = n()) %>% 
+  arrange(-n)
+# Max entries = 16 (Years monitored)
+
+length(unique(repro_data$Territorium))
+# 205 territories
+
+## retain only relevant variables
+repro_data <- repro_data %>% 
+  dplyr::select(Territorium, Tkurz, Mjahr, Faehe,  Ruede, Status, Npups, DECLNG, DECLAT, Repro)
+```
+
+## Add spatial data  
+
+### Habitat suitability
+```{r add habitat suitability data}
+nrow(repro_data) # 719
+
+## load habitat suitabilty map (values*1000)
+hs_map <- rast("./data_raw/ensemble_samebgpres_weightedmean_projection_3035.tif")
+hs_map
+
+## transform reproduction data into spatial data
+repro_sf <- st_as_sf(repro_data, coords = c("DECLNG", "DECLAT"), crs = 4326) %>% 
+  st_transform(crs = 3035)
+
+## Quick visualization
+plot(hs_map)
+plot(st_geometry(repro_sf), add = TRUE, col = "red")
+
+## extract habitat suitability values in radius of 8 km of centroid
+repro_buffers <- st_buffer(repro_sf, dist = 8000)
+
+repro_hs <- exactextractr::exact_extract(hs_map, repro_buffers, fun = "mean")
+
+wolf_repro_hs <- repro_sf %>%
+  mutate(hs_8km = repro_hs / 1000)
+  
+head(wolf_repro_hs)
+nrow(wolf_repro_hs) # 719
+
+summary(wolf_repro_hs)
+```
+
+### Territory density
+
+```{r use data from survival extraction}
+
+german_border <- st_read("./data_raw/germany_3035.gpkg", crs = 3035)
+
+wolf_terr_sf
+wolf_repro_hs
+
+```
+
+```{r get wolf density values in radius of territories over the years}
+
+## create a loop to extract the territory info for each year of first location
+nyears <- length(unique(wolf_repro_hs$Mjahr))
+total_area_buffer50 <- pi*50^2
+by_year_nterr <- data.frame()
+
+for (i in 1:nyears){
+  # select the year
+  tmp_year = unique(wolf_repro_hs$Mjahr)[i]
+  
+  # get individual 50km buffers in year
+  poly50_tmp <- wolf_repro_hs %>% 
+    filter(Mjahr == tmp_year) %>% 
+    st_buffer(dist = 50000) 
+  
+  # remove the area of the buffers outside germany
+  poly50_tmp_crop <- st_intersection(poly50_tmp, german_border)
+  
+  # add real area for each buffer in km2
+  poly50_tmp_crop <- poly50_tmp_crop %>% 
+    mutate(area_km2 = as.numeric(
+      st_area(poly50_tmp_crop) %>% 
+        set_units(km^2)))
+  
+  # get territory (packs and pairs) polygons in year
+  wolf_terr_tmp <- wolf_terr_sf %>% 
+    filter(Mjahr == tmp_year) %>% 
+    st_buffer(dist = 8000)
+  
+  # get number of territory polygons intersecting the individual buffer
+  intersect50_tmp <- st_intersects(poly50_tmp_crop, wolf_terr_tmp)
+  n_int50_tmp <- lengths(intersect50_tmp)
+  
+  # make into a dataframe
+  my_df_tmp <- cbind.data.frame(Territorium = poly50_tmp$Territorium,
+                          nterr_50km = n_int50_tmp, 
+                          area_buffer50km = poly50_tmp_crop$area_km2,
+                          Myear_first = tmp_year) 
+  # get territory density using buffer size
+  my_df_tmp_dens <- my_df_tmp %>% 
+    mutate(densTerr_50km = nterr_50km / (area_buffer50km) * total_area_buffer50) #n territories in equivalent buffer radius
+
+  by_year_nterr <- rbind(by_year_nterr, my_df_tmp_dens)
+  }
+
+
+head(by_year_nterr)
+nrow(by_year_nterr) #719
+nrow(wolf_repro_hs) #719
+
+
+## joint n terr to data
+wolf_repro_hs_nterr <- wolf_repro_hs %>% 
+  left_join(by_year_nterr, by = c("Territorium", "Mjahr" = "Myear_first"))
+
+nrow(wolf_repro_hs_nterr) #719
+head(wolf_repro_hs_nterr)
+length(unique(wolf_repro_hs_nterr$Territorium )) # 205
+```
+
+
+```{r}
+## make dataframe again
+wolf_repro_hs_nterr_df <- wolf_repro_hs_nterr %>% 
+  mutate(x_coord = st_coordinates(wolf_repro_hs)[,1],
+         y_coord = st_coordinates(wolf_repro_hs)[,2]) %>% 
+  st_drop_geometry()
+
+head(wolf_repro_hs_nterr_df)
+length(unique(wolf_repro_hs_nterr$Territorium)) # 205
+
+```
+
+
+## Add breeding female experience
+
+```{r add delta breeding ind in territory}
+# add breeding female time
+wolf_repro_dataset <- wolf_repro_hs_nterr_df %>% 
+  group_by(Territorium, Faehe) %>% 
+  mutate(N_Years_fem = n(),
+         First_year_fem = min(Mjahr)) %>% 
+  mutate(Delta_bfem = Mjahr - First_year_fem + 1) %>% 
+  as.data.frame()
+
+ggplot(wolf_repro_dataset, aes(x = Delta_bfem, y = Npups)) +
+  geom_smooth()
+```
+
+check the data and remove unknown females
+
+```{r}
+length(unique(wolf_repro_dataset$Faehe)) # 202
+length(unique(wolf_repro_dataset$Tkurz))# 205
+
+wolf_repro_dataset %>% 
+  filter(is.na(Faehe)) # no obs with Na
+
+wolf_repro_dataset %>% 
+  filter(Faehe == "") %>% 
+  summarise(n = n()) # 155 unknown
+
+## observations of females without the unknowns
+bfem <- wolf_repro_dataset %>% 
+  group_by(Faehe) %>% 
+  summarise(n = n()) %>% 
+  filter(Faehe != "") %>% 
+  group_by(n) %>% 
+  summarise(nfem = n())
+bfem
+  
+ggplot(bfem, aes(x = n)) +
+  geom_bar(aes(y = nfem), stat = "identity")
+```
+      n  nfem
+   <int> <int>
+ 1     1    66
+ 2     2    47
+ 3     3    32
+ 4     4    16
+ 5     5    18
+ 6     6     8
+ 7     7     9
+ 8     8     3
+ 9     9     1
+10    10     1
+
+```{r final repro data}
+wolf_repro_final <- wolf_repro_dataset %>% 
+  filter(Faehe != "")
+
+length(unique(wolf_repro_final$Faehe)) # [1] 201
+length(unique(wolf_repro_final$Territorium)) # [1] 165
+nrow(wolf_repro_final) # [1] 564
+head(wolf_repro_final)
+```
+
+```{r save reproduction data}
+## save data for later use 
+ # write.csv(wolf_repro_final, paste0(procdata_wd, "/data_wolf_reproduction_envconv_20230912.csv"),
+ #           row.names = FALSE)
+```
+
+```{r remove sensitive info}
+head(wolf_repro_final)
+
+repro_data_git <- wolf_repro_final %>% 
+  rename(Territory = Territorium, 
+         Tshort = Tkurz , 
+         sYear = Mjahr, 
+         Female = Faehe,
+         Male = Ruede) %>%  
+  group_by(Territory) %>% 
+  mutate(TerrID = cur_group_id()) %>% 
+  ungroup() %>% 
+  group_by(Female) %>% 
+  mutate(FemID = cur_group_id()) %>% 
+  ungroup() %>% 
+  group_by(Male) %>% 
+  mutate(MaleID = cur_group_id()) %>% 
+  ungroup() %>% 
+  mutate(MaleID = case_when(
+         Male == "" ~ NaN,
+         TRUE ~ MaleID)) %>% 
+  dplyr::select(TerrID, sYear, FemID, MaleID, Repro, Npups, hs_8km, nterr_50km, area_buffer50km, densTerr_50km, 
+                N_Years_fem, First_year_fem, Delta_bfem)
+
+write.csv(repro_data_git, paste0(procdata_wd, "/data_wolf_reproduction_table.csv"),
+                 row.names = FALSE)
+
+length(unique(repro_data_git$TerrID)) # 165
+```
+
