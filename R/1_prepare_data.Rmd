@@ -473,15 +473,17 @@ nrow(surv_data) # 1054
 
 ```{r save data}
 # save data for later use
-write.csv(surv_data, paste0(procdata_wd, "/data_wolf_survival_hs_nterr.csv"),
-                 row.names = FALSE)
+# write.csv(surv_data, paste0(procdata_wd, "/data_wolf_survival_hs_nterr.csv"),
+#                  row.names = FALSE)
+# surv_data <- read.csv(paste0(procdata_wd, "/data_wolf_survival_hs_nterr.csv"))
 ```
 
 ```{r remove sensitive info}
 surv_data_git <- surv_data %>% 
   mutate(IndID = seq(1, nrow(surv_data))) %>% 
   dplyr::select(IndID, weeks_date, status, sex = Sex,  
-                birth_date, birth_year, last_date, death_year, death_month, 
+                # birth_date, birth_year, last_date, death_year, 
+                death_month, 
                 season, hs_8km_natal, hs_8km_final,
                 nterr_buffer50_first, area_buffer50_first, nterr_dens_buffer50_first,
                 nterr_buffer50_last, area_buffer50_last, nterr_dens_buffer50_last)
@@ -752,8 +754,9 @@ head(wolf_repro_final)
 
 ```{r save reproduction data}
 ## save data for later use 
- # write.csv(wolf_repro_final, paste0(procdata_wd, "/data_wolf_reproduction_envconv_20230912.csv"),
+ # write.csv(wolf_repro_final, paste0(procdata_wd, "/data_wolf_reproduction_envconv.csv"),
  #           row.names = FALSE)
+# wolf_repro_final <- read.csv(paste0(procdata_wd, "/data_wolf_reproduction_envconv.csv"))
 ```
 
 ```{r remove sensitive info}
@@ -762,7 +765,7 @@ head(wolf_repro_final)
 repro_data_git <- wolf_repro_final %>% 
   rename(Territory = Territorium, 
          Tshort = Tkurz , 
-         sYear = Mjahr, 
+         # sYear = Mjahr, 
          Female = Faehe,
          Male = Ruede) %>%  
   group_by(Territory) %>% 
@@ -777,12 +780,12 @@ repro_data_git <- wolf_repro_final %>%
   mutate(MaleID = case_when(
          Male == "" ~ NaN,
          TRUE ~ MaleID)) %>% 
-  dplyr::select(TerrID, sYear, FemID, MaleID, Repro, Npups, hs_8km, nterr_50km, area_buffer50km, densTerr_50km, 
+  dplyr::select(TerrID, FemID, MaleID, Repro, Npups, hs_8km, nterr_50km, area_buffer50km, densTerr_50km, 
                 N_Years_fem, First_year_fem, Delta_bfem)
+
+length(unique(repro_data_git$TerrID)) # 165
 
 write.csv(repro_data_git, paste0(procdata_wd, "/data_wolf_reproduction_table.csv"),
                  row.names = FALSE)
-
-length(unique(repro_data_git$TerrID)) # 165
 ```
 
