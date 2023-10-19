@@ -1328,6 +1328,7 @@ ad_hs_plot <- ad_plot$plot
 #        dpi = 600, width = 6, height = 5)
 ```
 
+## Annual HR Plot
 ```{r yearly HR plots manuscript}
 juveniles_cox <- coxph(formula = best_formula_juv, data = juv_surv_scl)
 
@@ -1375,6 +1376,9 @@ toplot_all_rn$model <- fct_relevel(toplot_all_rn$model, "Juveniles", "Subadults"
 # Forest Plot
 str(toplot_all_rn)
 
+scico(4, palette = 'tokyo')
+
+my_palette <- c("#cd8500", "#551a8b", "#97B792")
 zp1 <- ggplot(toplot_all_rn, aes(group = as.factor(model), 
   colour = as.factor(model))) + 
   # future vertical line at 1
@@ -1394,13 +1398,9 @@ zp1 <- ggplot(toplot_all_rn, aes(group = as.factor(model),
   # color for significant
   scale_fill_manual(values = c("White", "black"), 
                     name = "Significant")+
-    # scale_y_continuous(limits = c(-4.2, 3)) +
-  # color for species
-  scale_color_manual(values = scico(4, begin = 0.15, palette = "tokyo"), 
+  # color for age classes
+  scale_color_manual(values = my_palette, 
                      name = "Age class") +
-  # scale_color_viridis(option = "magma", begin = 0.3, end = 0.9,
-  #                        guide = guide_legend(reverse = TRUE), discrete = TRUE) +
-  # extra esthetics
   theme(
     panel.background = element_rect(fill = "white"),
     plot.background = element_rect(fill = "transparent", colour = "transparent"),
@@ -1412,12 +1412,12 @@ zp1 <- ggplot(toplot_all_rn, aes(group = as.factor(model),
     axis.text = element_text(colour = "black", size = 16),
     legend.title = element_text(colour = "black", size = 14, face = "bold"),
     legend.text = element_text(colour = "black", size = 14)) 
-    #ggtitle("Hazard Ratios - Wolves")
+    
 
 zp1
 
 # save plot
-# ggsave(plot = zp1, paste0(plot_wd, "/Plot_survival_ageclasses_HR_pretty_scl.png"), 
+# ggsave(plot = zp1, paste0(plot_wd, "/Plot_survival_ageclasses_HR_pretty_scl.png"),
 #        dpi = 600, height = 6, width = 8)
 ```
 
