@@ -49,11 +49,6 @@ repro_tmp %>%
   arrange(-n)
 
 length(unique(repro_tmp$TerrID)) # 165
-
-repro_tmp %>% 
-  group_by(sYear) %>% 
-  summarise(n = n()) %>% 
-  as.data.frame()
 ```
 
 
