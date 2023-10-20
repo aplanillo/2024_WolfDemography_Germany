@@ -746,9 +746,9 @@ ggplot(bfem, aes(x = n)) +
 wolf_repro_final <- wolf_repro_dataset %>% 
   filter(Faehe != "")
 
-length(unique(wolf_repro_final$Faehe)) # [1] 201
-length(unique(wolf_repro_final$Territorium)) # [1] 165
-nrow(wolf_repro_final) # [1] 564
+length(unique(wolf_repro_final$Faehe))
+length(unique(wolf_repro_final$Territorium)) 
+nrow(wolf_repro_final) 
 head(wolf_repro_final)
 ```
 
@@ -781,9 +781,9 @@ repro_data_git <- wolf_repro_final %>%
          Male == "" ~ NaN,
          TRUE ~ MaleID)) %>% 
   dplyr::select(TerrID, FemID, MaleID, Repro, Npups, hs_8km, nterr_50km, area_buffer50km, densTerr_50km, 
-                N_Years_fem, First_year_fem, Delta_bfem)
+                Delta_bfem)
 
-length(unique(repro_data_git$TerrID)) # 165
+length(unique(repro_data_git$TerrID)) 
 
 write.csv(repro_data_git, paste0(procdata_wd, "/data_wolf_reproduction_table.csv"),
                  row.names = FALSE)
