@@ -478,6 +478,18 @@ nrow(surv_data) # 1054
 # surv_data <- read.csv(paste0(procdata_wd, "/data_wolf_survival_hs_nterr.csv"))
 ```
 
+```{r n ind alive in 2020}
+head(surv_data)
+surv_data %>% 
+  group_by(eff_last_year, status) %>% 
+  # group_by(status) %>% 
+  summarise(n = n()) %>% 
+  filter(eff_last_year == 2020)
+  
+# 269 censored individuals in 2020
+```
+
+
 ```{r remove sensitive info}
 surv_data_git <- surv_data %>% 
   mutate(IndID = seq(1, nrow(surv_data))) %>% 
@@ -609,7 +621,7 @@ summary(wolf_repro_hs)
 
 german_border <- st_read("./data_raw/germany_3035.gpkg", crs = 3035)
 
-wolf_terr_sf
+repro_sf
 wolf_repro_hs
 
 ```
@@ -640,7 +652,7 @@ for (i in 1:nyears){
         set_units(km^2)))
   
   # get territory (packs and pairs) polygons in year
-  wolf_terr_tmp <- wolf_terr_sf %>% 
+  wolf_terr_tmp <- repro_sf %>% 
     filter(Mjahr == tmp_year) %>% 
     st_buffer(dist = 8000)
   
@@ -688,12 +700,23 @@ length(unique(wolf_repro_hs_nterr$Territorium)) # 205
 
 ```
 
+## Add n years of territory establishment
+
+```{r add territory years}
+wolf_repro_dataset_years <- wolf_repro_hs_nterr_df %>% 
+  group_by(Territorium) %>% 
+  arrange(Mjahr) %>% 
+  mutate(maxyears = n()) %>% 
+  mutate(nyears = 1:n()) %>% 
+  ungroup() %>% 
+  as.data.frame()
+```
 
 ## Add breeding female experience
 
 ```{r add delta breeding ind in territory}
 # add breeding female time
-wolf_repro_dataset <- wolf_repro_hs_nterr_df %>% 
+wolf_repro_dataset <- wolf_repro_dataset_years %>% 
   group_by(Territorium, Faehe) %>% 
   mutate(N_Years_fem = n(),
          First_year_fem = min(Mjahr)) %>% 
@@ -708,7 +731,7 @@ check the data and remove unknown females
 
 ```{r}
 length(unique(wolf_repro_dataset$Faehe)) # 202
-length(unique(wolf_repro_dataset$Tkurz))# 205
+length(unique(wolf_repro_dataset$Territorium))# 205
 
 wolf_repro_dataset %>% 
   filter(is.na(Faehe)) # no obs with Na
@@ -754,8 +777,8 @@ head(wolf_repro_final)
 
 ```{r save reproduction data}
 ## save data for later use 
- # write.csv(wolf_repro_final, paste0(procdata_wd, "/data_wolf_reproduction_envconv.csv"),
- #           row.names = FALSE)
+# write.csv(wolf_repro_final, paste0(procdata_wd, "/data_wolf_reproduction_envconv.csv"),
+#            row.names = FALSE)
 # wolf_repro_final <- read.csv(paste0(procdata_wd, "/data_wolf_reproduction_envconv.csv"))
 ```
 
@@ -764,8 +787,59 @@ head(wolf_repro_final)
 
 repro_data_git <- wolf_repro_final %>% 
   rename(Territory = Territorium, 
-         Tshort = Tkurz , 
-         # sYear = Mjahr, 
+         #Tshort = Tkurz , 
+         sYear = Mjahr,
+         Female = Faehe,
+         Male = Ruede) %>%  
+  group_by(Territory) %>% 
+  mutate(TerrID = cur_group_id()) %>% 
+  ungroup() %>% 
+  group_by(Female) %>% 
+  mutate(FemID = cur_group_id()) %>% 
+  ungroup() %>% 
+  group_by(Male) %>% 
+  mutate(MaleID = cur_group_id()) %>%
+  ungroup() %>% 
+  mutate(MaleID = case_when(
+    Male == "" ~ NaN,
+    TRUE ~ as.numeric(MaleID))) %>% 
+  dplyr::select(TerrID, FemID, MaleID, Repro, Npups, hs_8km, nterr_50km, area_buffer50km, 
+                densTerr_50km, Delta_bfem, sYear, nyears)
+
+length(unique(repro_data_git$TerrID)) 
+
+write.csv(repro_data_git, paste0(procdata_wd, "/data_wolf_reproduction_table.csv"),
+                 row.names = FALSE)
+```
+
+
+# Prepare Subset Reproduction Data - Intense sampling effort
+
+Same as before but just for years 2010 and 2011.
+
+
+## Filter reproduction data
+
+```{r subset reproduction data}
+# wolf_repro_final <- read.csv(paste0(procdata_wd, "/data_wolf_reproduction_envconv.csv"))
+
+head(wolf_repro_final)
+
+wolf_repro_subset <- wolf_repro_final %>% 
+  ## remove data after 2012
+  ungroup() %>% 
+  filter(Mjahr %in% c(2010, 2011)) # select only 2010 and 2011 data
+
+wolf_repro_subset
+```
+
+```{r remove sensitive info}
+head(wolf_repro_subset)
+
+repro_data_subset_git <- wolf_repro_subset %>% 
+  rename(Territory = Territorium, 
+         # Tshort = Tkurz , 
+         sYear = Mjahr,
          Female = Faehe,
          Male = Ruede) %>%  
   group_by(Territory) %>% 
@@ -781,11 +855,11 @@ repro_data_git <- wolf_repro_final %>%
          Male == "" ~ NaN,
          TRUE ~ MaleID)) %>% 
   dplyr::select(TerrID, FemID, MaleID, Repro, Npups, hs_8km, nterr_50km, area_buffer50km, densTerr_50km, 
-                Delta_bfem)
+                Delta_bfem, nyears)
 
-length(unique(repro_data_git$TerrID)) 
+length(unique(repro_data_subset_git$TerrID)) 
+## 14 Territories
 
-write.csv(repro_data_git, paste0(procdata_wd, "/data_wolf_reproduction_table.csv"),
+write.csv(repro_data_subset_git, paste0(procdata_wd, "/data_wolf_reproduction_table_subset.csv"),
                  row.names = FALSE)
 ```
-
