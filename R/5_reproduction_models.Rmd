@@ -191,7 +191,7 @@ wolf_repro_pa_scl <- wolf_repro %>%
          Delta_bfem = scale(Delta_bfem)) %>% 
   ## add number of successes per territory as weights due to binomial distribution
   group_by(TerrID) %>% 
-  mutate(terr_weights = sum(Repro_event)) %>% 
+  # mutate(terr_weights = sum(Repro_event)) %>% 
   ungroup()
 
 ## run models
@@ -215,7 +215,7 @@ parepro_aictab[1:2,]
 ```
 
 Best model is the density model 
-Second best is the null female
+Second best is the null model
 
 
 ## get base probability of reproduction from the null model
