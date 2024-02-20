@@ -33,7 +33,7 @@ surv_wolf <- read.csv(paste0(procdata_wd, "/data_wolf_survival_table.csv"))
 
 head(surv_wolf)
 nrow(surv_wolf)
-# [1] 1062
+# [1] 1054
 
 ```
 
@@ -53,7 +53,7 @@ wolf_surv_data <- surv_wolf %>%
 head(wolf_surv_data)
 
 wolf_surv_data %>% 
-  group_by(death_year, age_death) %>% 
+  group_by(age_death) %>% 
   summarise(n = n()) 
 ```
 
@@ -64,8 +64,8 @@ wolf_surv_data %>%
   summarise(n = n())
 #   sex       n
 #   <chr> <int>
-# 1 f       486
-# 2 m       576
+# 1 f       480
+# 2 m       574
 
 ## by season
 wolf_surv_data %>% 
@@ -73,8 +73,8 @@ wolf_surv_data %>%
   summarise(n = n())
 #   season     n
 #   <chr>  <int>
-# 1 Summer   264
-# 2 Winter   798
+# 1 Summer   321
+# 2 Winter   733
 
 ## mean natal HS
 mean(wolf_surv_data$hs_8km_natal)
@@ -379,6 +379,11 @@ avg_prop <- weighted.mean(x = prop_pups$prop, w = prop_pups$total_year)
 avg_prop
 # [1] 0.891844
 
+weighted_var <- Hmisc::wtd.var(x = prop_pups$prop, weights = prop_pups$total_year)
+sd_prop <- sqrt(weighted_var)
+sd_prop
+# [1] 0.04491692
+
 # palette
 my_lines <- c("avg_prop" = "dashed")
 
@@ -423,6 +428,15 @@ ggsave(filename =  paste0(plot_wd, "/Plot_summary_repro_years_nterr.png"),
 ```
 
 ```{r plot number of pups}
+## for all territories 
+wolf_repro %>% 
+  # filter(Npups > 0) %>% 
+  summarise(mean_pups = mean(Npups), 
+            sd_pups = sd(Npups)) 
+#   mean_pups  sd_pups
+# 1  3.72 2.27
+
+## for territories with reproduction
 wolf_repro %>% 
   filter(Npups > 0) %>% 
   summarise(mean_pups = mean(Npups), 
