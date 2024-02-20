@@ -7,7 +7,7 @@
 mylibraries <- c("dplyr", "ggplot2", "lubridate", "sf", "tmap", "terra", "units",
                  "exactextractr", "forcats", "paletteer", "fitdistrplus", "tidyr",
                  "ggcorrplot", "survival", "AICcmodavg", "broom", "survminer", 
-                 "patchwork", "cowplot", "scico", "lme4", "ggeffects", 
+                 "Hmisc", "patchwork", "cowplot", "scico", "lme4", "ggeffects", 
                  "grid", "gridExtra")
 
 for (i in 1:length(mylibraries)) {
