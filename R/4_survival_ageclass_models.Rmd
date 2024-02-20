@@ -141,122 +141,62 @@ ad_surv_peryear %>%
 
 ### get summaries by age class
 ```{r get numbers by sex and season}
+## pool data together
+head(ad_surv)
+colnames(juv_surv_tomerge)
+colnames(sub_surv_tomerge)
+colnames(ad_surv_tomerge)
+
+juv_surv_tomerge <- juv_surv %>% 
+  mutate(ageclass = "juveniles") %>% 
+  dplyr::select(-status_juveniles, -weeks_juveniles)
+
+sub_surv_tomerge <- sub_surv %>% 
+  mutate(ageclass = "subadults") %>% 
+  dplyr::select(-status_subadults, -weeks_subadults)
+
+ad_surv_tomerge <- ad_surv %>% 
+  mutate(ageclass = "adults") %>% 
+  dplyr::select(-weeks_adults)
+
+ageclass_surv <- rbind(juv_surv_tomerge, sub_surv_tomerge, ad_surv_tomerge)
+head(ageclass_surv)
+
 ## by sex
-juv_surv %>% 
-  group_by(sex) %>% 
+ageclass_surv %>% 
+  group_by(ageclass, sex) %>% 
   summarise(n = n())
-# sex       n
-#   <chr> <int>
-# 1 f       480
-# 2 m       574
-
-sub_surv %>% 
-  group_by(sex) %>% 
-  summarise(n = n())
-# sex       n
-#   <chr> <int>
-# 1 f       242
-# 2 m       232
-
-ad_surv %>% 
-  group_by(sex) %>% 
-  summarise(n = n())
-# sex       n
-#   <chr> <int>
-# 1 f       122
-# 2 m       93
-
+#   ageclass  sex       n
+#   <chr>     <chr> <int>
+# 1 adults    f       122
+# 2 adults    m        93
+# 3 juveniles f       480
+# 4 juveniles m       574
+# 5 subadults f       242
+# 6 subadults m       232
+  
 
 ## by season
-juv_surv %>% 
-  group_by(season) %>% 
+ageclass_surv %>% 
+  group_by(ageclass, season) %>% 
   summarise(n = n())
-# sex       n
-#   <chr> <int>
-# 1 Summer   321
-# 2 Winter   733
+#   ageclass  season     n
+#   <chr>     <chr>  <int>
+# 1 adults    Summer    89
+# 2 adults    Winter   126
+# 3 juveniles Summer   321
+# 4 juveniles Winter   733
+# 5 subadults Summer   201
+# 6 subadults Winter   273
 
-sub_surv %>% 
-  group_by(season) %>% 
-  summarise(n = n())
-# sex       n
-#   <chr> <int>
-# 1 Summer   201
-# 2 Winter   273
-
-ad_surv %>% 
-  group_by(season) %>% 
-  summarise(n = n())
-# sex       n
-#   <chr> <int>
-# 1 Summer   89
-# 2 Winter   126
+## get mean and sd habitat
+ageclass_surv %>% 
+  group_by(ageclass) %>% 
+  summarise_at(vars(hs_8km_natal, hs_8km_final, nterr_dens_buffer50_first, nterr_dens_buffer50_last),
+               list(mean, sd, min, max)) %>% 
+  as.data.frame()
 ```
 
-```{r get mean and sd habitat}
-## mean natal HS
-mean(juv_surv$hs_8km_natal)
-# [1] 0.3756536
-mean(sub_surv$hs_8km_natal)
-# [1] 0.3886633
-mean(ad_surv$hs_8km_natal)
-# [1] 0.4063552
-
-sd(juv_surv$hs_8km_natal)
-# [1] 0.101517
-sd(sub_surv$hs_8km_natal)
-# [1] 0.1024055
-sd(ad_surv$hs_8km_natal)
-# [1] 0.09747033
-
-## mean final HS
-mean(juv_surv$hs_8km_final)
-# [1] 0.3388906
-mean(sub_surv$hs_8km_final)
-# [1] 0.337044
-mean(ad_surv$hs_8km_final)
-# [1] 0.3476939
-
-sd(juv_surv$hs_8km_final)
-# [1] 0.1067531
-sd(sub_surv$hs_8km_final)
-# [1] 0.1040397
-sd(ad_surv$hs_8km_final)
-# [1] 0.1043546
-```
-
-```{r get mean and sd nterr}
-## mean natal nterr
-mean(juv_surv$nterr_dens_buffer50_first)
-# [1] 21.16594
-mean(sub_surv$nterr_dens_buffer50_first)
-# [1] 19.77647
-mean(ad_surv$nterr_dens_buffer50_first)
-# [1] 19.35073
-
-sd(juv_surv$nterr_dens_buffer50_first)
-# [1] 14.75159
-sd(sub_surv$nterr_dens_buffer50_first)
-# [1] 14.42961
-sd(ad_surv$nterr_dens_buffer50_first)
-# [1] 14.36183
-
-
-## mean natal nterr
-mean(juv_surv$nterr_dens_buffer50_last)
-# [1] 21.64657
-mean(sub_surv$nterr_dens_buffer50_last)
-# [1] 21.72394
-mean(ad_surv$nterr_dens_buffer50_last)
-# [1] 24.63462
-
-sd(juv_surv$nterr_dens_buffer50_last)
-# [1] 15.77476
-sd(sub_surv$nterr_dens_buffer50_last)
-# [1] 16.17725
-sd(ad_surv$nterr_dens_buffer50_last)
-# [1] 16.69232
-```
 
 ## Correlations among variables
 ```{r}
