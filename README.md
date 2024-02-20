@@ -11,6 +11,7 @@ The project is organized in such a way that all scripts and relative paths will 
 * The <b> scripts 1 and 2 </b> prepare the data for the analyses and run some summaries. 
 * The <b> scripts 3 and 4 </b> run the survival analyses for the population and for the different age classes, respectively.
 * The <b> script 5 </b> runs the reproduction analyses.
+* The <b> script 6 </b> obtains a quick measure of population growth.
 * The <b> source scripts </b> contain custom made functions used during the survival analysis as well as all packages required to run the scripts.
 
 **NOTE**
