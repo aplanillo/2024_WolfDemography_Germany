@@ -1,0 +1,329 @@
+---
+title: "growth_estimation"
+author: "A. Planillo"
+date: "2024-02-19"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Estimates of population growth (lambda)
+
+3 age classes Age-structured Matrix Population Model 
+Adapted from code provided by Henrik Andren 
+
+```{r}
+rm(list=ls())
+library(popbio)
+```
+
+
+## Matrix 3 age classes
+Leslie matrix with 3 age classes (juvenile (0 to 1 yrs); subadults (1 to 2 yrs); adults (2+))
+Post breeding
+
+### define parameters
+```{r parameters}
+surv_juv <- 0.75
+surv_subad <- 0.75
+surv_ad <- 0.88
+
+prop_rep <- 0.88
+litter_size <- 4.08
+p_fem <- 0.5 # proportion of female in the litter
+
+stages<-c("juvenile", "subadults", "adults") 
+```
+
+### built population matrix
+```{r}
+AA <- matrix(c(0, 0, p_fem * prop_rep * litter_size * surv_ad,
+               surv_juv, 0, 0,
+               0, surv_subad, surv_ad),
+             nrow = 3, byrow = TRUE, dimnames = list(stages,c("","","")) )
+```
+
+## get population growth rate
+```{r}
+eigen.analysis(AA)$lambda1
+# [1] 1.360259
+log(eigen.analysis(AA)$lambda1)
+```
+
+## observed population growth
+```{r}
+nterr_2010 <- 14 
+nterr_2020 <- 185 # numbers from the repro table^, removing single individuals
+
+growth <- (nterr_2020/nterr_2010)^1/10
+growth
+# [1] 1.32
+```
+
+
+## incorporate uncertainty estimates - Stochastic version
+```{r}
+n <- 10000 # number of iteration
+lambda.st <- numeric(n)
+sur.juv <- numeric(n)
+sur.subad <- numeric(n)
+sur.ad <- numeric(n)
+prop.rep <- numeric(n)
+litter.size <- numeric(n)
+
+mj <- 0.75 # mean juvenile survival
+sj <- 0.06 # standard deviation juvenile survival
+
+## Moment matching for beta distribution
+ja <- (mj^2-mj^3-mj*sj^2)/sj^2
+jb <- (mj-2*mj^2+mj^3-sj^2+mj*sj^2)/sj^2
+
+ms <- 0.75 # mean subadult survival
+ss <- 0.10 # standard deviation subadult survival
+
+## Moment matching for beta distribution
+ssa <- (ms^2-ms^3-ms*ss^2)/ss^2
+ssb <- (ms-2*ms^2+ms^3-ss^2+ms*ss^2)/ss^2
+
+ma <- 0.88 # mean adult survival
+sa <- 0.03 # standard deviation adult survival
+
+## Moment matching for beta distribution
+aa <- (ma^2-ma^3-ma*sa^2)/sa^2
+ab <- (ma-2*ma^2+ma^3-sa^2+ma*sa^2)/sa^2
+
+mr <- 0.88 # mean proportion female reproducing
+sr <- 0.05 # standard deviation proportion female reproducing
+## Moment matching for beta distribution
+ra <- (mr^2-mr^3-mr*sr^2)/sr^2
+rb <- (mr-2*mr^2+mr^3-sr^2+mr*sr^2)/sr^2
+
+mp <- 4.08 # mean litter size
+sp <- 0.14 # 2.03 standard deviation litter size; SE = 2.03/sqrt(205) = 0.14
+
+## Moment matching for gamma distribution
+a.gam <- mp^2/sp^2
+b.gam <- mp/sp^2
+
+p.fem <- 0.5 ## p.fem # constant 0.5
+
+stages <- c("juvenile", "subadults", "adults")
+```
+
+## Run the simulations
+```{r}
+for (i in 1:n){
+  sur.juv[i] = rbeta(1,ja,jb)
+  sur.subad[i] = rbeta(1,ssa,ssb)
+  sur.ad[i] = rbeta(1,aa,ab)
+  prop.rep[i] = rbeta(1,ra,rb)
+  litter.size[i] = rgamma(1,a.gam,b.gam)
+  
+  AA.st <- matrix(c(
+    0,0,p.fem*prop.rep[i]*litter.size[i]*sur.ad[i],
+    sur.juv[i],0,0,
+    0,sur.subad[i],sur.ad[i]),
+    nrow = 3, byrow = TRUE,dimnames=list(stages,c("","","")) )
+    lambda.st[i] <- eigen.analysis(AA.st)$lambda1
+  
+}
+
+mean(lambda.st)
+median(lambda.st)
+sd(lambda.st)
+hist(lambda.st, breaks=100, freq=F)
+lines(density(lambda.st), col="red", lwd=2)
+abline(v=mean(lambda.st), col="blue", lwd=2)
+
+hist(log(lambda.st), breaks=100, freq=F)
+lines(density(log(lambda.st)), col="red", lwd=2)
+abline(v=mean(log(lambda.st)), col="blue", lwd=2)
+
+## simulated data
+mean(sur.juv)
+mean(sur.subad)
+mean(sur.ad)
+mean(prop.rep)
+mean(litter.size)
+```
+
+
+## Plot the density functions for survival and reproduction
+simulated data and distributions
+```{r}
+xx <- seq(0,1,0.001)
+hist(sur.juv, freq=F, breaks=100)
+p.juv <- dbeta(xx,ja,jb)
+lines(typ="l",xx,p.juv ,col="red")
+
+p.sub <- dbeta(xx,ssa,ssb)
+hist(sur.subad, freq=F, breaks=100)
+lines(typ="l",xx,p.sub ,col="red")
+
+p.ad <- dbeta(xx,aa,ab)
+hist(sur.ad, freq=F, breaks=100)
+lines(typ="l",xx,p.ad ,col="red")
+
+p.rep <- dbeta(xx,ra,rb)
+hist(prop.rep, freq=F, breaks=100)
+lines(typ="l",xx,p.rep ,col="red")
+
+x2 <- seq(0,10,0.01)
+hist(litter.size, freq=F, breaks=100)
+p.lit = dgamma(x2,a.gam,b.gam)
+lines(typ="l",x2,p.lit ,col="red")
+
+```
+
+## Sensitivities
+```{r}
+eigout <- eigen.analysis(AA)
+
+eigout$lambda1
+eigout$sensitivities
+```
+
+
+# estimate population growth at low and high habitat suitability
+
+## Low habitat suitability
+
+Estimate extremes of hte habitat suitability effects, taking into accountes changes to:
+- Juvenile survival
+- Subadult survival
+- Npups in reproduction
+
+No changes to adult survival or probability of reproduction, as those were not observed in the analyses
+
+### estimate survivals for low habitat suitability
+```{r juvenile survival}
+## juveniles (using the dataset from the survival analyses)
+juv_cox <- coxph(Surv(weeks_juveniles, status_juveniles) ~ sex + season + hs_8km_natal + nterr_dens_buffer50_first, data = juv_surv_scl)
+
+juveniles_fit <- survfit(juv_cox, na.action = "na.rm") 
+
+# get survival and confidence interval
+round(juveniles_fit$surv[length(juveniles_fit$surv)], 2)
+
+## predict hs 
+juv_hs_df <- with(juv_surv_scl,
+               data.frame(
+                 sex = c("f"),
+                 season = c("Summer"),
+                 hs_8km_natal = c(min(hs_8km_natal),
+                                 mean(hs_8km_natal),
+                                 max(hs_8km_natal)), 
+                  nterr_dens_buffer50_first = mean(nterr_dens_buffer50_first)))
+                   
+fit <- survfit(juv_cox, newdata = juv_hs_df)
+round(fit$surv[nrow(fit$surv),], 2)
+
+
+surv_juv_low <- 0.58  
+surv_juv_high <- 0.85
+```
+
+```{r subadult survival}
+## subadults (using the dataset from the survival analyses)
+subad_cox <- coxph(Surv(weeks_subadults, status_subadults) ~ sex * season + hs_8km_natal + nterr_dens_buffer50_first + hs_8km_final + nterr_dens_buffer50_last, data = sub_surv_scl)
+
+sub_fit <- survfit(subad_cox, na.action = "na.rm") 
+
+# get survival and confidence interval
+round(sub_fit$surv[length(sub_fit$surv)], 2)
+
+## predict hs 
+sub_hs_df <- with(sub_surv_scl,
+               data.frame(
+                 sex = c("f"),
+                 season = c("Summer"),
+                 hs_8km_natal = c(min(hs_8km_natal),
+                                 mean(hs_8km_natal),
+                                 max(hs_8km_natal)),
+                 hs_8km_final = mean(hs_8km_natal),
+                 nterr_dens_buffer50_first = mean(nterr_dens_buffer50_first), 
+                 nterr_dens_buffer50_last = mean(nterr_dens_buffer50_last)))
+                   
+sub_fit2 <- survfit(subad_cox, newdata = sub_hs_df)
+round(sub_fit2$surv[nrow(sub_fit2$surv),], 2)
+
+
+surv_sub_low <- 0.66  
+surv_sub_high <- 0.81
+```
+
+
+## estimate reproduction effects
+```{r}
+
+prop_rep_low <- prop_rep_high <- 0.88 ## this value does not change
+
+## number of pups
+Npups_model <- readRDS(paste0(tmp_wd, "/Repro_Npups_bestModel_model_weights_20231010.rds"))
+Npups_model@call
+exp(mean(predict(Npups_model)))
+
+wolf_repro_withpups <- wolf_repro_withpups %>% 
+   filter(!TerrID %in% c(54, 71)) ## remove territories not analysed
+  
+
+npups_lowhs_df <- with(wolf_repro_withpups,
+               data.frame(
+                 TerrID = unique(wolf_repro_withpups$TerrID), 
+                 hs_8km = c(min(hs_8km)),
+                 densTerr_50km = mean(densTerr_50km), 
+                 Delta_bfem = mean(Delta_bfem)))
+
+npups_highhs_df <- with(wolf_repro_withpups,
+               data.frame(
+                 TerrID = unique(wolf_repro_withpups$TerrID), 
+                 hs_8km = c(max(hs_8km)),
+                 densTerr_50km = mean(densTerr_50km), 
+                 Delta_bfem = mean(Delta_bfem)))
+
+
+lowhs_npups <- mean(predict(Npups_model, npups_lowhs_df))
+high_npups <- mean(predict(Npups_model, npups_highhs_df))
+
+```
+
+
+```{r}
+surv_subad <- 0.75
+surv_ad <- 0.88
+
+prop_rep <- 0.88
+litter_size_low <- exp(lowhs_npups)
+litter_size_high <- exp(high_npups)
+
+p_fem <- 0.5 # proportion of female in the litter
+
+stages<-c("juvenile", "subadults", "adults") 
+```
+
+
+### built population matrices
+```{r}
+AA_low <- matrix(c(0, 0, p_fem * prop_rep * litter_size_low * surv_ad,
+               surv_juv_low, 0, 0,
+               0, surv_sub_low, surv_ad),
+             nrow = 3, byrow = TRUE, dimnames = list(stages,c("","","")) )
+
+
+AA_high <- matrix(c(0, 0, p_fem * prop_rep * litter_size_high * surv_ad,
+               surv_juv_high, 0, 0,
+               0, surv_sub_high, surv_ad),
+             nrow = 3, byrow = TRUE, dimnames = list(stages,c("","","")) )
+```
+
+## get population growth rate
+```{r}
+eigen.analysis(AA_low)$lambda1
+# [1] 1.221282
+eigen.analysis(AA_high)$lambda1
+# [1] 1.486122
+```

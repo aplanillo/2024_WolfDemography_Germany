@@ -12,3 +12,5 @@ data_proc/data_wolf_survival_hs_nterr.csv
 docs/
 output/
 R/_oldCode.Rmd
+R/5_2_reproduction_models_datasubset.Rmd
+data_proc/data_wolf_reproduction_table_subset.csv
