@@ -33,6 +33,10 @@ wolf_surv_df <- read.csv(paste0(procdata_wd, "/data_wolf_survival_table.csv"))
 
 head(wolf_surv_df)
 nrow(wolf_surv_df)
+
+wolf_surv_df %>% 
+  group_by(status, sex) %>% 
+  summarise(n = n())
 ## Divide into age classes 
 
 # selec juveniles and censored the not dead ones
@@ -46,7 +50,7 @@ juv_surv <- wolf_surv_df %>%
   ))
   
 juv_surv %>% 
-  group_by(status_juveniles) %>% 
+  group_by(status_juveniles, sex) %>% 
   summarise(nind = n())
 #  status  nind
 #    <int> <int>
@@ -72,7 +76,7 @@ nrow(sub_surv)
 # 474
 
 sub_surv %>% 
-  group_by(status_subadults) %>% 
+  group_by(status_subadults, sex) %>% 
   summarise(nind = n())
 #  status_subadults  nind
 #              <dbl> <int>
@@ -143,9 +147,9 @@ ad_surv_peryear %>%
 ```{r get numbers by sex and season}
 ## pool data together
 head(ad_surv)
-colnames(juv_surv_tomerge)
-colnames(sub_surv_tomerge)
-colnames(ad_surv_tomerge)
+# colnames(juv_surv_tomerge)
+# colnames(sub_surv_tomerge)
+# colnames(ad_surv_tomerge)
 
 juv_surv_tomerge <- juv_surv %>% 
   mutate(ageclass = "juveniles") %>% 
@@ -195,6 +199,7 @@ ageclass_surv %>%
   summarise_at(vars(hs_8km_natal, hs_8km_final, nterr_dens_buffer50_first, nterr_dens_buffer50_last),
                list(mean, sd, min, max)) %>% 
   as.data.frame()
+
 ```
 
 
