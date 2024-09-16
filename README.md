@@ -1,5 +1,7 @@
 # clupus_demography_DE
 
+<blockquote> Scripts to reproduce the analyses in Planillo et al. 2024. Wildlife Biology</blockquote>
+
 Demographic anlaysis of German wolf population until 2020
 
 This project contains the code to reproduce the demographic analyses of the wolf population. The project is organized in two folder:
