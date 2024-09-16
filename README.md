@@ -1,6 +1,8 @@
-# clupus_demography_DE
+# Planillo et al. 2024. Habitat and density effects on the demography of an expanding wolf population in Central Europe. Wildlife Biology.
 
-<blockquote> Scripts to reproduce the analyses in Planillo et al. 2024. Wildlife Biology. DOI: 10.1002/wlb3.01246</blockquote>
+<blockquote> Publication DOI: 10.1002/wlb3.01246
+  
+Repository DOI (Dryad): </blockquote>
 
 Demographic anlaysis of German wolf population until 2020
 
