@@ -2,7 +2,7 @@
 
 <blockquote> Publication DOI: 10.1002/wlb3.01246
   
-Repository DOI (Dryad): </blockquote>
+Repository DOI (Dryad): https://doi.org/10.5061/dryad.dncjsxm5m</blockquote>
 
 Demographic anlaysis of German wolf population until 2020
 
