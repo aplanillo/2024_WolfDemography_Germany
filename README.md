@@ -1,6 +1,6 @@
 # clupus_demography_DE
 
-<blockquote> Scripts to reproduce the analyses in Planillo et al. 2024. Wildlife Biology</blockquote>
+<blockquote> Scripts to reproduce the analyses in Planillo et al. 2024. Wildlife Biology. DOI: 10.1002/wlb3.01246</blockquote>
 
 Demographic anlaysis of German wolf population until 2020
 
